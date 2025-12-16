@@ -1,6 +1,6 @@
 # BERT 知識追蹤 (Knowledge Tracing) 微調專案
 
-這是一個使用 BERT 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、精熟）。
+這是一個使用 BERT 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、良好、精熟）。
 
 ## 📁 專案結構
 
@@ -67,14 +67,6 @@ finetune_KT/
 
 ## 🛠 環境設置
 
-### 系統需求
-
-- **Python**: 3.8 或以上（建議 3.10+）
-- **PyTorch**: 2.2.0 或以上
-- **CUDA**: 可選，用於 GPU 加速（建議 11.8 或以上）
-- **RAM**: 建議 16GB 以上
-- **儲存空間**: 至少 10GB
-
 ### Linux/Mac
 
 ```bash
@@ -91,91 +83,20 @@ pip install --upgrade pip setuptools wheel
 pip install -r requirements.txt
 ```
 
-### Windows
-
-```cmd
-# 創建虛擬環境
-python -m venv venv
-
-# 啟動虛擬環境
-venv\Scripts\activate
-
-# 升級 pip
-python -m pip install --upgrade pip setuptools wheel
-
-# 安裝依賴
-pip install -r requirements.txt
-```
-
-## 📦 套件版本說明
-
-本專案使用以下核心套件版本（2024年最新穩定版）：
-
-| 套件 | 版本 | 說明 |
-|------|------|------|
-| `torch` | ≥2.2.0 | PyTorch 深度學習框架 |
-| `transformers` | ≥4.37.0 | Hugging Face Transformers |
-| `tokenizers` | ≥0.15.0 | 快速 tokenization 引擎 |
-| `datasets` | ≥2.17.0 | Hugging Face 資料集工具 |
-| `accelerate` | ≥0.26.0 | 分散式訓練加速（必要） |
-| `pandas` | ≥2.2.0,<3.0.0 | 資料處理 |
-| `numpy` | ≥1.26.0,<2.0.0 | 數值計算 |
-| `scikit-learn` | ≥1.4.0 | 機器學習工具 |
-| `pyarrow` | ≥15.0.0 | 高效資料讀取 |
-| `matplotlib` | (可選) | 繪製訓練曲線 |
-
-### ⚠️ 重要提示
-
-1. **transformers ≥4.37.0 強制需要 accelerate ≥0.26.0**
-   - 若未安裝 accelerate，會出現 `ImportError: accelerate>=0.26.0 required`
-   - 解決方式：`pip install 'accelerate>=0.26.0'`
-
-2. **確保使用最新版 pip**
-   - 舊版 pip 可能無法正確解析套件相依性
-   - 執行：`pip install --upgrade pip`
-
-3. **GPU 支援**
-   - 若要使用 GPU，請確認已安裝對應的 CUDA 版本
-   - 檢查：`python -c "import torch; print(torch.cuda.is_available())"`
-
-### 驗證安裝
-
-```bash
-# 檢查套件版本
-pip list | grep -E "torch|transformers|accelerate|datasets"
-
-# 驗證相依性（應無錯誤）
-pip check
-
-# 測試核心套件 import
-python -c "from transformers import BertTokenizer; print('✓ transformers OK')"
-python -c "import accelerate; print('✓ accelerate OK')"
-python -c "import torch; print('✓ torch OK')"
-python -c "from datasets import load_dataset; print('✓ datasets OK')"
-```
-
-預期輸出：
-```
-✓ transformers OK
-✓ accelerate OK
-✓ torch OK
-✓ datasets OK
-```
-
 ## 🚀 快速開始
 
 ### 步驟 1: 準備資料集
 
-將您的資料集放在 `datasets/finetune_dataset.csv`，確保包含以下欄位：
+將您的資料集放在 `datasets/finetune_dataset_k4_global.csv`，確保包含以下欄位：
 
 | 欄位名稱 | 說明 | 範例 |
 |---------|------|------|
 | `chapter` | 章節名稱 | 監督式學習 |
 | `section` | 知識點 | 線性迴歸 |
-| `all_logs` | 作答紀錄 | 答對5題答錯1題 |
+| `all_logs` | 作答紀錄 | ［題目1］：（簡答題）什麼是前向傳播？<br>［學生答案］：...<br>［學生表現］：部分正確 |
 | `Preview_ChatLog` | 課前對話 | 老師這個概念是什麼 |
 | `Review_ChatLog` | 課後對話 | 我理解了謝謝 |
-| `Mastery_Level` | 掌握度標籤 | 精熟 / 尚可 / 待加強 |
+| `Mastery_Level_K4` | 掌握度標籤（4等級） | 精熟 / 良好 / 尚可 / 待加強 |
 
 ### 步驟 2: 執行訓練
 
@@ -185,46 +106,38 @@ python finetune_bert.py
 
 **訓練輸出範例**:
 ```
-原始資料 'finetune_dataset.csv' 讀取成功，共 250 筆
-資料清理完成，剩餘 240 筆有效資料
+原始資料 'finetune_dataset_k4_global.csv' 讀取成功，共 995 筆
+資料清理完成，剩餘 995 筆有效資料
 
 原始資料標籤分佈：
-  待加強 (label=0): 80 筆 (33.33%)
-  尚可 (label=1): 80 筆 (33.33%)
-  精熟 (label=2): 80 筆 (33.33%)
+  待加強 (label=0): 248 筆 (24.92%)
+  尚可 (label=1): 249 筆 (25.03%)
+  良好 (label=2): 249 筆 (25.03%)
+  精熟 (label=3): 249 筆 (25.03%)
 
-資料分割完成：訓練集 192 筆, 驗證集 48 筆
+資料分割完成：訓練集 796 筆, 驗證集 199 筆
 
 模型將在 cuda 上運行
 
 --- 開始 Finetune ---
-Epoch 1/3: 100%|████████| 48/48 [02:15<00:00]
-Epoch 2/3: 100%|████████| 48/48 [02:10<00:00]
-Epoch 3/3: 100%|████████| 48/48 [02:08<00:00]
+Epoch 1/3: {'loss': 1.63, 'accuracy': 0.90}
+Epoch 2/3: {'loss': 0.21, 'accuracy': 0.94}
+Epoch 3/3: {'loss': 0.11, 'accuracy': 0.97}
 
 --- 訓練完成 ---
-模型與 Tokenizer 已儲存至: ./my_finetuned_bert_kt_model
+模型與 Tokenizer 已儲存至: ./results/bert-base-chinese_20251217_000816/final_model
 ```
 
-### 步驟 3: 檢視訓練結果
-
-訓練完成後，可以使用 `view_training_history.py` 來檢視訓練曲線和摘要。該腳本會自動讀取 `results/` 目錄下最新的訓練結果。
-
-```bash
-python view_training_history.py
-```
-
-若要指定特定的結果目錄，請修改腳本中的 `TARGET_DIR` 變數。
-
-### 步驟 4: 使用訓練好的模型
+### 步驟 3: 使用訓練好的模型
 
 ```python
 from transformers import BertTokenizer, BertForSequenceClassification
 import torch
 
-# 載入模型
-model = BertForSequenceClassification.from_pretrained('./my_finetuned_bert_kt_model')
-tokenizer = BertTokenizer.from_pretrained('./my_finetuned_bert_kt_model')
+# 載入模型（使用最新的訓練結果）
+model_path = "./results/bert-base-chinese_20251217_000816/final_model"  # 更換為你的模型路徑
+model = BertForSequenceClassification.from_pretrained(model_path)
+tokenizer = BertTokenizer.from_pretrained(model_path)
 
 # 準備輸入
 text = """
@@ -247,9 +160,306 @@ with torch.no_grad():
     prediction = torch.argmax(outputs.logits, dim=1).item()
 
 # 結果
-label_map = {0: "待加強", 1: "尚可", 2: "精熟"}
+label_map = {0: "待加強", 1: "尚可", 2: "良好", 3: "精熟"}
 print(f"預測結果: {label_map[prediction]}")
 ```
+
+## 📊 訓練結果視覺化
+
+### 訓練曲線圖解讀
+
+訓練完成後，會在 `results/bert-base-chinese_<timestamp>/` 目錄下生成視覺化圖表。
+
+#### training_metrics_visualization.png
+
+此圖表包含兩個子圖，幫助您了解模型的訓練狀況：
+
+**1. Validation Loss（驗證損失）**
+- **Y軸**：Loss 值（越低越好）
+- **X軸**：Epoch（訓練輪數）
+- **理想曲線**：穩定下降
+- **警訊**：
+  - 📈 上升 → 可能過擬合
+  - 📊 震盪 → 學習率可能過高
+  - ➖ 平坦 → 模型可能已收斂
+
+**2. Validation Accuracy（驗證準確率）**
+- **Y軸**：準確率（0-1，越高越好）
+- **X軸**：Epoch（訓練輪數）
+- **理想曲線**：穩定上升
+- **目標**：
+  - ✅ > 0.7 (70%) - 良好
+  - ✅ > 0.8 (80%) - 優秀
+  - ✅ > 0.9 (90%) - 卓越
+
+#### 範例解讀
+
+**良好的訓練曲線特徵**：
+- ✅ Loss 穩定下降（例如：0.27 → 0.11）
+- ✅ Accuracy 持續上升（例如：90% → 97%）
+- ✅ 曲線平滑，沒有劇烈震盪
+- ✅ 沒有過擬合跡象
+
+**需要注意的情況**：
+- ⚠️ Loss 上升：可能過擬合，考慮減少 epochs
+- ⚠️ Accuracy 停滯：可能需要調整學習率
+- ⚠️ 曲線震盪：學習率可能過高
+
+---
+
+## 🔧 訓練過程詳解
+
+### Loss Function（損失函數）
+
+本專案使用 **Cross-Entropy Loss**（交叉熵損失）進行 4 分類任務。
+
+#### 什麼是 Cross-Entropy Loss？
+
+Cross-Entropy Loss 衡量模型預測的機率分佈與真實標籤之間的差異。
+
+**數學概念**：
+```
+Loss = -Σ y_true * log(y_pred)
+```
+
+**4 分類範例**：
+- 真實標籤：精熟 (label=3)
+- 模型預測機率：[0.1, 0.2, 0.1, 0.6]
+  - 待加強：10%
+  - 尚可：20%
+  - 良好：10%
+  - 精熟：60% ✓
+- Loss = -log(0.6) ≈ 0.51
+
+**為什麼使用 Cross-Entropy？**
+- ✅ 適合分類任務
+- ✅ 懲罰錯誤的預測
+- ✅ 鼓勵模型輸出高信心的正確預測
+- ✅ 可微分，適合梯度下降優化
+
+### 優化器（Optimizer）
+
+使用 **AdamW** 優化器：
+- **Adam**：自適應學習率優化器（Adaptive Moment Estimation）
+- **W**：Weight Decay（權重衰減）正則化
+
+**參數設定**：
+```python
+learning_rate: 5e-5      # 學習率（BERT fine-tuning 的標準值）
+weight_decay: 0.01       # 權重衰減（防止過擬合）
+```
+
+**AdamW 的優勢**：
+- ✅ 自動調整每個參數的學習率
+- ✅ 對學習率不敏感
+- ✅ 收斂速度快
+- ✅ 適合 Transformer 模型
+
+### 學習率調度（Learning Rate Scheduler）
+
+使用 **Linear Warmup + Decay** 策略：
+
+**Warmup 階段**（前 50 steps）：
+- 學習率從 0 線性增加到 5e-5
+- 目的：穩定訓練初期，避免梯度爆炸
+
+**Decay 階段**（之後）：
+- 學習率線性衰減到接近 0
+- 目的：精細調整模型參數
+
+**為什麼需要 Warmup？**
+- ✅ 避免初期梯度過大導致不穩定
+- ✅ 讓模型逐步適應資料
+- ✅ 提高訓練穩定性
+
+**學習率變化示意**：
+```
+5e-5 |     ╱‾‾‾‾‾‾‾‾‾‾‾‾‾‾╲
+     |    ╱                  ╲
+     |   ╱                    ╲
+     |  ╱                      ╲___
+0    |_╱__________________________|___
+     0   50  100  150  200  250  300
+         Warmup    Training Steps
+```
+
+### 訓練配置詳解
+
+```python
+{
+    "num_train_epochs": 3,                    # 訓練 3 輪
+    "per_device_train_batch_size": 4,         # 每個 GPU 的 batch size
+    "per_device_eval_batch_size": 4,          # 評估時的 batch size
+    "learning_rate": 5e-5,                    # 初始學習率
+    "warmup_steps": 50,                       # Warmup 步數
+    "weight_decay": 0.01,                     # 權重衰減
+    "logging_steps": 10,                      # 每 10 步記錄一次
+    "eval_strategy": "epoch",                 # 每個 epoch 結束後評估
+    "save_strategy": "epoch",                 # 每個 epoch 結束後儲存
+    "load_best_model_at_end": True,           # 載入最佳模型
+    "metric_for_best_model": "accuracy",      # 以準確率為最佳模型指標
+}
+```
+
+**參數說明**：
+
+| 參數 | 說明 | 為什麼這樣設定 |
+|------|------|---------------|
+| `num_train_epochs: 3` | 訓練 3 輪 | 足夠讓模型收斂，避免過擬合 |
+| `batch_size: 4` | 每次處理 4 筆資料 | 平衡記憶體使用和訓練穩定性 |
+| `learning_rate: 5e-5` | 學習率 0.00005 | BERT fine-tuning 的標準值 |
+| `warmup_steps: 50` | 前 50 步預熱 | 穩定訓練初期 |
+| `weight_decay: 0.01` | 權重衰減 1% | 防止過擬合 |
+| `eval_strategy: "epoch"` | 每輪評估 | 及時發現問題 |
+| `load_best_model_at_end` | 載入最佳模型 | 確保使用最優性能的模型 |
+
+### 評估指標
+
+**Accuracy（準確率）**：
+```
+Accuracy = 正確預測數 / 總預測數
+```
+
+**範例計算**：
+- 驗證集：199 筆
+- 正確預測：193 筆
+- Accuracy = 193/199 ≈ 0.9698 (96.98%)
+
+**為什麼使用 Accuracy？**
+- ✅ 直觀易懂
+- ✅ 適合平衡資料集
+- ✅ 與實際應用場景一致
+
+### 防止過擬合的機制
+
+1. **Weight Decay (0.01)**
+   - 懲罰過大的權重
+   - 鼓勵模型簡化
+   - L2 正則化的變體
+
+2. **Early Stopping**
+   - 載入驗證集表現最好的模型
+   - 避免訓練過久
+   - 自動選擇最佳 checkpoint
+
+3. **Stratified Split**
+   - 訓練集和驗證集保持相同的標籤分佈
+   - 確保評估公平
+   - 避免資料偏差
+
+4. **Dropout（BERT 內建）**
+   - 訓練時隨機丟棄部分神經元
+   - 增強模型泛化能力
+   - 防止過度依賴特定特徵
+
+### Epoch 小數點說明
+
+訓練過程中，您可能會看到 `epoch: 0.1`, `epoch: 0.2` 等小數點：
+
+**為什麼會有小數點？**
+- 每隔 10 個 steps 記錄一次訓練指標
+- 小數點表示當前 epoch 的完成進度
+- 例如：`epoch: 1.5` 表示第 2 個 epoch 完成了 50%
+
+**計算方式**：
+```
+當前 epoch = 已處理樣本數 / 總訓練樣本數
+```
+
+**範例**：
+- 總訓練樣本：796 筆
+- Batch size：4
+- 每個 epoch 的 steps：796 ÷ 4 = 199 steps
+- Step 100/199 → epoch ≈ 1.0（第 1 個 epoch 完成）
+- Step 110/199 → epoch ≈ 1.1（第 2 個 epoch 的 10%）
+
+---
+
+## ❓ 常見問題
+
+### Q1: 為什麼訓練準確率是 100% 但驗證準確率只有 97%？
+
+**A**: 這是正常現象，稱為「過擬合」的輕微跡象。
+- **訓練集**：模型已經看過，容易記住
+- **驗證集**：模型沒看過，測試真實能力
+- **97% 的驗證準確率已經非常優秀**
+
+**如何判斷是否過擬合？**
+- ✅ 正常：訓練和驗證準確率都很高（如 100% vs 97%）
+- ⚠️ 過擬合：訓練準確率很高，驗證準確率很低（如 100% vs 60%）
+
+### Q2: Loss 和 Accuracy 哪個更重要？
+
+**A**: 兩者都重要，但關注點不同：
+- **Loss**：優化目標，越低越好，反映模型的學習進度
+- **Accuracy**：實際性能，更直觀，反映模型的預測能力
+- **建議**：Loss 下降 + Accuracy 上升 = 訓練成功 ✅
+
+### Q3: 如何判斷模型是否過擬合？
+
+**A**: 觀察訓練曲線：
+- ✅ **正常**：訓練和驗證 Loss 都下降
+- ⚠️ **過擬合**：訓練 Loss 下降，驗證 Loss 上升
+- **解決方法**：
+  - 增加 `weight_decay`（例如：0.01 → 0.05）
+  - 減少 `epochs`（例如：5 → 3）
+  - 增加訓練資料
+
+### Q4: 為什麼有些資料超過 512 tokens？
+
+**A**: BERT 的最大輸入長度是 512 tokens。
+- **超過的部分會被截斷**
+- **26% 的資料超過 512 是可接受的**
+- **替代方案**：
+  - 使用 Longformer（支援 4096 tokens）
+  - 使用 BigBird（支援更長文本）
+  - 調整資料預處理策略
+
+### Q5: 可以調整哪些參數來改善性能？
+
+**A**: 常見調整策略：
+
+**增加訓練輪數**：
+```python
+"num_train_epochs": 5,  # 從 3 增加到 5
+```
+
+**調整學習率**：
+```python
+"learning_rate": 3e-5,  # 從 5e-5 降低（更穩定）
+```
+
+**增加 Batch Size**（需要更多 GPU 記憶體）：
+```python
+"per_device_train_batch_size": 8,  # 從 4 增加到 8
+```
+
+**增加資料量**：
+- 收集更多訓練資料
+- 使用資料增強技術
+
+### Q6: 訓練時出現 "CUDA out of memory" 怎麼辦？
+
+**A**: 降低記憶體使用：
+```python
+"per_device_train_batch_size": 2,  # 從 4 降到 2
+"per_device_eval_batch_size": 2,   # 從 4 降到 2
+```
+
+或使用梯度累積：
+```python
+"gradient_accumulation_steps": 2,  # 累積 2 步再更新
+```
+
+### Q7: 如何解讀訓練日誌中的 epoch 小數點？
+
+**A**: 小數點表示訓練進度：
+- `epoch: 0.1` = 第 1 個 epoch 的 10%
+- `epoch: 1.0` = 第 1 個 epoch 完成
+- `epoch: 2.5` = 第 3 個 epoch 的 50%
+
+這是正常且有用的設計，幫助您即時監控訓練進度。
+
 
 ## 🧪 測試
 
