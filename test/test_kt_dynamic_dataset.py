@@ -98,7 +98,11 @@ class TestKTDynamicDataset:
         assert '答對5題答錯1題' in decoded_text_no_space
         assert '這是什麼概念' in decoded_text_no_space
         assert '我懂了' in decoded_text_no_space
-        assert '精熟' in decoded_text_no_space
+        # 驗證掌握度答案不在文本中（避免資料洩漏）
+        assert '精熟' not in decoded_text_no_space, "掌握度答案不應出現在訓練文本中"
+        assert '尚可' not in decoded_text_no_space, "掌握度答案不應出現在訓練文本中"
+        assert '良好' not in decoded_text_no_space, "掌握度答案不應出現在訓練文本中"
+        assert '待加強' not in decoded_text_no_space, "掌握度答案不應出現在訓練文本中"
         
         # 驗證結構化關鍵詞
         assert '章節' in decoded_text_no_space or '章节' in decoded_text_no_space

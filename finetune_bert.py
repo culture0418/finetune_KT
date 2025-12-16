@@ -290,11 +290,12 @@ class KTDataProcessor:
         print(f"🔍 檢查超過 {threshold} tokens 的資料詳細資訊：")
         
         for idx, row in df.iterrows():
-            # 重現 KTDynamicDataset 的組字邏輯 (必須保持一致)
+            # 重現 KTDynamicDataset            # 重建與訓練時相同的格式化文本
+            # 注意：必須與 KTDynamicDataset 使用相同格式
             formatted_text = (
                 f"章節 : {row['chapter']}\n"
                 f"知識點 : {row['section']}\n"
-                f"學生掌握度 : {row['Mastery_Level_K4']} [MASK]\n"
+                f"學生掌握度 : [MASK]\n"
                 f"作答紀錄 :\n{row['all_logs']}\n"
                 f"[課前相關對話紀錄]\n{row['Preview_ChatLog']}\n"
                 f"[課後相關對話紀錄]\n{row['Review_ChatLog']}\n"
@@ -364,10 +365,11 @@ class KTDynamicDataset(Dataset):
 
         # 3. 【核心：動態文本合併】
         # 根據您的範本即時組合字串
+        # 注意：學生掌握度使用 [MASK] 隱藏，避免資料洩漏
         formatted_text = (
             f"章節 : {chapter}\n"
             f"知識點 : {section}\n"
-            f"學生掌握度 : {mastery_text} [MASK]\n"
+            f"學生掌握度 : [MASK]\n"
             f"作答紀錄 :\n{all_logs}\n"
             f"[課前相關對話紀錄]\n{preview_chat}\n"
             f"[課後相關對話紀錄]\n{review_chat}\n"
