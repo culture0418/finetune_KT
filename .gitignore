@@ -1,0 +1,29 @@
+
+# Python cache and environment
+__pycache__/
+*.pyc
+venv/
+
+# Testing outputs
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Model checkpoints and training artifacts
+bert_kt_finetune_results/
+my_finetuned_bert_kt_model/
+results/*/checkpoint-*/
+results/*/final_model/
+training_result/
+logs/
+
+# Common model file types
+*.pt
+*.pth
+*.safetensors
+*.h5
+*.ckpt
+
+# Dataset and output folders (optional, uncomment if needed)
+# datasets/
+# dummy_output/
