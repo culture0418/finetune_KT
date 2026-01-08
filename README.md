@@ -1,36 +1,41 @@
 # BERT 知識追蹤 (Knowledge Tracing) 微調專案
 
-這是一個使用 BERT 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、良好、精熟）。
+這是一個使用 BERT 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、精熟）。
+
+## 🌟 最新更新
+
+- ✅ 整合 **Optuna 超參數搜索**，自動尋找最佳訓練參數
+- ✅ 更新為 **3 級掌握度**（待加強、尚可、精熟）
+- ✅ 使用新資料集 `finetune_dataset_1132_v2.csv`
+- ✅ 最佳 macro-F1: **97.62%**
 
 ## 📁 專案結構
 
 ```
 finetune_KT/
 │
-├── 📄 finetune_bert.py              # 主程式：資料處理、Dataset、訓練邏輯
+├── 📄 finetune_bert.py              # 主程式：資料處理、Dataset、訓練邏輯、Optuna 搜索
+│   ├── TrainingVisualizer          # 訓練結果視覺化、中文字體支援
 │   ├── KTDataProcessor             # 資料處理類別
 │   ├── KTDynamicDataset            # PyTorch Dataset 類別
-│   └── BertKTFinetuner             # 訓練器類別
+│   ├── BertKTFinetuner             # 訓練器類別
+│   └── HyperparameterSearcher      # Optuna 超參數搜索器
 │
-├── 📄 view_training_history.py      # 訓練結果視覺化工具
+├── 📄 view_training_history.py      # 訓練結果事後檢視工具
 ├── 📄 requirements.txt              # Python 套件依賴
-├── 📄 pytest.ini                    # pytest 配置文件
 ├── 📄 .gitignore                    # Git 忽略文件配置
 ├── 📄 README.md                     # 專案說明文件（本文件）
 │
-├── 📁 test/                         # 測試資料夾
-│   ├── 📄 __init__.py              # 使 test 成為 Python package
-│   ├── 📄 test_kt_data_processor.py    # KTDataProcessor 單元測試（10個測試案例）
-│   ├── 📄 test_kt_dynamic_dataset.py   # KTDynamicDataset 單元測試（22個測試案例）
-│   └── 📄 test_bert_kt_finetunner.py   # BertKTFinetuner 單元測試（5個測試案例）
-│
 ├── 📁 datasets/                     # 資料集資料夾
-│   └── 📄 finetune_dataset.csv     # 訓練資料集（需自行準備）
+│   └── 📄 finetune_dataset_1132_v2.csv  # 訓練資料集
 │
-├── 📁 venv/                         # Python 虛擬環境（git ignored）
-├── 📁 bert_kt_finetune_results/    # 訓練過程檔案（自動生成，git ignored）
-├── 📁 my_finetuned_bert_kt_model/  # 最終訓練完成的模型（自動生成，git ignored）
-└── 📁 logs/                         # TensorBoard 訓練日誌（自動生成，git ignored）
+├── 📁 optuna_results/              # Optuna 搜索結果
+│   └── 📄 study_results.csv          # 所有 trials 詳細結果
+│
+├── 📁 results/                      # 訓練結果資料夾
+│   └── 📁 best_model_{timestamp}/   # 最佳模型和視覺化圖表
+│
+└── 📁 venv/                         # Python 虛擬環境（git ignored）
 ```
 
 ## 🧠 模型說明
@@ -93,36 +98,51 @@ pip install -r requirements.txt
 |---------|------|------|
 | `chapter` | 章節名稱 | 監督式學習 |
 | `section` | 知識點 | 線性迴歸 |
-| `all_logs` | 作答紀錄 | ［題目1］：（簡答題）什麼是前向傳播？<br>［學生答案］：...<br>［學生表現］：部分正確 |
-| `Preview_ChatLog` | 課前對話 | 老師這個概念是什麼 |
-| `Review_ChatLog` | 課後對話 | 我理解了謝謝 |
-| `Mastery_Level_K4` | 掌握度標籤（4等級） | 精熟 / 良好 / 尚可 / 待加強 |
+| `Short_Answer_Log` | 簡答題作答紀錄 | ［題目1］：（簡答題）什麼是前向傳播？... |
+| `Dialog` | 對話紀錄 | 老師這個概念是什麼... |
+| `Mastery_Label` | 掌握度標籤（3等級） | 精熟 / 尚可 / 待加強 |
 
 ### 步驟 2: 執行訓練
 
+#### 方式一：使用 Optuna 自動搜索最佳參數（推薦）
+
+```python
+# 在 finetune_bert.py 中設定
+MODE = "search"  # 超參數搜索模式
+```
+
 ```bash
-python finetune_bert.py
+# 背景執行（SSH 斷線也會繼續）
+nohup python3 finetune_bert.py > training.log 2>&1 &
+```
+
+搜索完成後會自動使用最佳參數進行 60 epochs 完整訓練。
+
+#### 方式二：直接訓練
+
+```python
+# 在 finetune_bert.py 中設定
+MODE = "train"  # 正常訓練模式
 ```
 
 **訓練輸出範例**:
 ```
-原始資料 'finetune_dataset_k4_global.csv' 讀取成功，共 995 筆
-資料清理完成，剩餘 995 筆有效資料
+原始資料 'finetune_dataset_1132_v2.csv' 讀取成功，共 725 筆
+資料清理完成，剩餘 725 筆有效資料
 
 原始資料標籤分佈：
-  待加強 (label=0): 248 筆 (24.92%)
-  尚可 (label=1): 249 筆 (25.03%)
-  良好 (label=2): 249 筆 (25.03%)
-  精熟 (label=3): 249 筆 (25.03%)
+  待加強 (label=0): 296 筆 (40.83%)
+  尚可 (label=1): 339 筆 (46.76%)
+  精熟 (label=2): 90 筆 (12.41%)
 
-資料分割完成：訓練集 796 筆, 驗證集 199 筆
+資料分割完成：訓練集 580 筆, 驗證集 145 筆
 
 模型將在 cuda 上運行
 
 --- 開始 Finetune ---
-Epoch 1/3: {'loss': 1.63, 'accuracy': 0.90}
-Epoch 2/3: {'loss': 0.21, 'accuracy': 0.94}
-Epoch 3/3: {'loss': 0.11, 'accuracy': 0.97}
+Epoch 1: {'eval_loss': 0.70, 'eval_macro_f1': 0.58}
+...
+Epoch 60: {'eval_loss': 0.36, 'eval_macro_f1': 0.92}
 
 --- 訓練完成 ---
 模型與 Tokenizer 已儲存至: ./results/bert-base-chinese_20251217_000816/final_model
