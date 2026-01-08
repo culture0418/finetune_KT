@@ -9,18 +9,21 @@ venv/
 .coverage
 htmlcov/
 
-# Model checkpoints and training artifacts
+# Model checkpoints (exclude checkpoint-*, final_model, and trial folders)
 bert_kt_finetune_results/
 my_finetuned_bert_kt_model/
 results/*/checkpoint-*/
 results/*/final_model/
+optuna_results/trial_*/
 training_result/
 logs/
 
-# Common model file types
+# Training logs
+*.log
+
+# Common model file types (keep final_model folder but exclude loose model files)
 *.pt
 *.pth
-*.safetensors
 *.h5
 *.ckpt
 

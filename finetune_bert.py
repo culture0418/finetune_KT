@@ -2,12 +2,14 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
+import matplotlib.font_manager as fm
 import os
+import sys
 from datetime import datetime
 import torch
 from torch.utils.data import Dataset
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from transformers import (
     BertConfig,
     BertTokenizer,
@@ -15,6 +17,8 @@ from transformers import (
     TrainingArguments,
     Trainer
 )
+import optuna
+from optuna.visualization import plot_optimization_history, plot_param_importances
 
 class TrainingVisualizer:
     """
@@ -22,9 +26,34 @@ class TrainingVisualizer:
     """
     def __init__(self, output_dir: str):
         self.output_dir = output_dir
-        ensure_dir_exists(self.output_dir)
-        # 設定非互動式後端，避免在 Server 上報錯
-        matplotlib.use('Agg')
+        self._ensure_dir_exists(self.output_dir)
+        matplotlib.use('Agg')         # 設定非互動式後端，避免在 Server 上報錯
+        self._set_chinese_font()       # 設定中文字體
+    
+    @staticmethod
+    def _set_chinese_font():
+        """設定 Matplotlib 使用 Taipei Sans TC Beta 字體以正確顯示中文"""
+        font_path = "/home/culture/.local/share/fonts/TaipeiSansTCBeta-Bold.ttf"
+        
+        if not os.path.exists(font_path):
+            print(f"⚠️ 找不到字體檔案：{font_path}")
+            print("⚠️ 將使用系統預設字體，中文可能顯示為方塊")
+            return None
+        
+        prop = fm.FontProperties(fname=font_path)
+        font_name = prop.get_name() if prop.get_name() else 'sans-serif'
+        plt.rcParams['font.family'] = font_name
+        plt.rcParams['font.sans-serif'] = [font_name]
+        plt.rcParams['axes.unicode_minus'] = False
+        
+        print(f"✅ Matplotlib 已設定字體：{font_name} ({font_path})")
+        return prop
+    
+    @staticmethod
+    def _ensure_dir_exists(path: str):
+        """確保目標資料夾及其所有父資料夾存在"""
+        os.makedirs(path, exist_ok=True)
+        print(f"✓ 資料夾已確認存在: {path}")
 
     def plot(self, log_history: list):
         """
@@ -61,7 +90,7 @@ class TrainingVisualizer:
             print("⚠️ 警告：Log history 為空，無法繪圖。")
             return
 
-        # 2. 繪製圖表
+        # 2. 繪製主要圖表 (Loss 和 Overall Accuracy)
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
         fig.suptitle('BERT Knowledge Tracing - Training History', fontsize=16, fontweight='bold')
 
@@ -105,43 +134,225 @@ class TrainingVisualizer:
 
         plt.tight_layout()
         
-        # 3. 儲存檔案
-        # 使用更具描述性的檔名
+        # 3. 儲存主要圖表
         img_path = os.path.join(self.output_dir, 'training_metrics_visualization.png')
         plt.savefig(img_path, dpi=300)
         print(f"✅ 圖表已儲存至: {img_path}")
-        plt.close(fig) # 釋放記憶體
+        plt.close(fig)
 
-        # 4. 儲存 CSV 摘要
+        # 4. 繪製每個類別的指標圖表
+        self._plot_per_class_metrics(log_history, epochs)
+        
+        # 5. 繪製最終指標 Heatmap
+        self._plot_final_metrics_heatmap(log_history)
+
+        # 6. 儲存 CSV 摘要
         if eval_accs:
-            df = pd.DataFrame({
+            # 動態收集所有 eval_ 開頭的指標
+            csv_data = {
                 'Epoch': epochs,
                 'Eval_Loss': eval_losses,
                 'Eval_Accuracy': eval_accs
-            })
+            }
+            
+            # 提取每個類別的指標 - 更新為 3 個等級
+            label_names = ["待加強", "尚可", "精熟"]
+            metric_types = ["precision", "recall", "f1", "accuracy"]
+            
+            # 為每個類別和指標類型建立欄位
+            for label_name in label_names:
+                for metric_type in metric_types:
+                    metric_key = f"eval_{label_name}_{metric_type}"
+                    values = []
+                    for log in log_history:
+                        if 'eval_loss' in log:  # 只在 eval 的 log 中提取
+                            values.append(log.get(metric_key, 0.0))
+                    if values:
+                        csv_data[f"{label_name}_{metric_type}"] = values
+            
+            df = pd.DataFrame(csv_data)
             csv_path = os.path.join(self.output_dir, 'training_metrics_summary.csv')
             df.to_csv(csv_path, index=False)
             print(f"✅ 摘要已儲存至: {csv_path}")
 
+    def _plot_per_class_metrics(self, log_history: list, epochs: list):
+        """
+        繪製每個類別的 precision, recall, f1, accuracy 曲線
+        
+        Args:
+            log_history (list): Trainer.state.log_history
+            epochs (list): Epoch 列表
+        """
+        if not epochs:
+            return
+        
+        # 3 個掌握度等級：待加強、尚可、精熟
+        label_names = ["待加強", "尚可", "精熟"]
+        metric_types = ["precision", "recall", "f1", "accuracy"]
+        
+        # 提取每個類別的所有指標
+        class_metrics = {label: {metric: [] for metric in metric_types} for label in label_names}
+        
+        for log in log_history:
+            if 'eval_loss' in log:  # 只處理 eval 的 log
+                for label_name in label_names:
+                    for metric_type in metric_types:
+                        metric_key = f"eval_{label_name}_{metric_type}"
+                        value = log.get(metric_key, 0.0)
+                        class_metrics[label_name][metric_type].append(value)
+        
+        # 檢查是否有數據
+        has_data = any(len(class_metrics[label][metric]) > 0 
+                       for label in label_names 
+                       for metric in metric_types)
+        
+        if not has_data:
+            print("⚠️ 警告：沒有找到每個類別的指標數據，跳過繪製。")
+            return
+        
+        # 定義顏色方案
+        colors = {
+            "待加強": "#e74c3c",  # 紅色
+            "尚可": "#f39c12",    # 橙色
+            # 藍色
+            "精熟": "#2ecc71"     # 綠色
+        }
+        
+        # 創建 2x2 子圖 (4個指標)
+        fig, axes = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Per-Class Metrics - Training Progress', fontsize=16, fontweight='bold')
+        
+        # 將 axes 展平以便迭代
+        axes_flat = axes.flatten()
+        
+        # 為每個指標類型繪製圖表
+        for idx, metric_type in enumerate(metric_types):
+            ax = axes_flat[idx]
+            
+            # 為每個類別繪製曲線
+            for label_name in label_names:
+                values = class_metrics[label_name][metric_type]
+                if values:
+                    ax.plot(epochs, values, 
+                           marker='o', 
+                           label=label_name, 
+                           color=colors[label_name], 
+                           linewidth=2,
+                           markersize=6)
+            
+            # 設置圖表屬性
+            metric_display_name = metric_type.upper() if metric_type == 'f1' else metric_type.capitalize()
+            ax.set_xlabel('Epoch', fontsize=11)
+            ax.set_ylabel(metric_display_name, fontsize=11)
+            ax.set_title(f'{metric_display_name} by Class', fontsize=13, fontweight='bold')
+            ax.legend(loc='best', fontsize=10)
+            ax.grid(True, alpha=0.3)
+            ax.set_ylim([0, 1.05])  # 設置 y 軸範圍 0-1
+        
+        plt.tight_layout()
+        
+        # 儲存圖表
+        per_class_img_path = os.path.join(self.output_dir, 'per_class_metrics_visualization.png')
+        plt.savefig(per_class_img_path, dpi=300)
+        print(f"✅ 每個類別指標圖表已儲存至: {per_class_img_path}")
+        plt.close(fig)
+    
+    def _plot_final_metrics_heatmap(self, log_history: list):
+        """
+        繪製混淆矩陣 Heatmap
+        顯示真實標籤 vs 預測標籤，以了解哪些類別容易被誤判
+        
+        Args:
+            log_history (list): Trainer.state.log_history
+        """
+        # 注意：此方法需要在訓練後重新評估以獲取預測結果
+        # 由於 log_history 中沒有完整的預測數據，我們需要另外處理
+        # 這個方法將在 BertKTFinetuner.run_finetuning() 中被調用
+        print("⚠️ 混淆矩陣將在訓練完成後生成")
+    
+    def plot_confusion_matrix(self, y_true, y_pred, class_names):
+        """
+        繪製混淆矩陣 Heatmap
+        
+        Args:
+            y_true: 真實標籤
+            y_pred: 預測標籤
+            class_names: 類別名稱列表
+        """
+        from sklearn.metrics import confusion_matrix
+        import numpy as np
+        
+        # 計算混淆矩陣
+        cm = confusion_matrix(y_true, y_pred)
+        
+        # 創建圖表
+        fig, ax = plt.subplots(figsize=(10, 8))
+        
+        # 繪製 heatmap
+        im = ax.imshow(cm, cmap='YlOrRd', aspect='auto')
+        
+        # 設置 ticks
+        ax.set_xticks(np.arange(len(class_names)))
+        ax.set_yticks(np.arange(len(class_names)))
+        ax.set_xticklabels(class_names, fontsize=12)
+        ax.set_yticklabels(class_names, fontsize=12)
+        
+        # 設置軸標籤
+        ax.set_xlabel('預測標籤 (Predicted Label)', fontsize=14, fontweight='bold')
+        ax.set_ylabel('真實標籤 (True Label)', fontsize=14, fontweight='bold')
+        ax.set_title('混淆矩陣 (Confusion Matrix)', fontsize=16, fontweight='bold', pad=20)
+        
+        # 在每個格子中顯示數值和百分比
+        for i in range(len(class_names)):
+            for j in range(len(class_names)):
+                # 計算百分比（相對於該真實類別的總數）
+                percentage = (cm[i, j] / cm[i].sum() * 100) if cm[i].sum() > 0 else 0
+                
+                # 根據背景顏色選擇文字顏色
+                text_color = "white" if cm[i, j] > cm.max() / 2 else "black"
+                
+                # 顯示數量和百分比
+                text = ax.text(j, i, f'{cm[i, j]}\n({percentage:.1f}%)',
+                             ha="center", va="center", color=text_color, 
+                             fontsize=13, fontweight='bold')
+        
+        # 添加顏色條
+        cbar = plt.colorbar(im, ax=ax)
+        cbar.set_label('樣本數量', rotation=270, labelpad=20, fontsize=12)
+        
+        # 添加網格線
+        ax.set_xticks(np.arange(len(class_names)) - 0.5, minor=True)
+        ax.set_yticks(np.arange(len(class_names)) - 0.5, minor=True)
+        ax.grid(which="minor", color="white", linestyle='-', linewidth=3)
+        
+        plt.tight_layout()
+        
+        # 儲存圖表
+        confusion_matrix_path = os.path.join(self.output_dir, 'confusion_matrix_heatmap.png')
+        plt.savefig(confusion_matrix_path, dpi=300, bbox_inches='tight')
+        print(f"✅ 混淆矩陣 Heatmap 已儲存至: {confusion_matrix_path}")
+        plt.close(fig)
+
 
 class KTDataProcessor:
     """
-    功用：專門處理 finetune_dataset_k4_global.csv 檔案。
-    負責載入、清理、轉換標籤，並分割資料集。
+    功用：專門處理 finetune_dataset_1132_v2.csv 檔案。
+    負責載入、清理、轉換標籤（3 個掌握度等級：待加強、尚可、精熟），並分割資料集。
     """
     def __init__(self, csv_path: str):
         """
         初始化物件，傳入 CSV 檔案的路徑。
         
         Args:
-            csv_path (str): 'finetune_dataset.csv' 的路徑
+            csv_path (str): 'finetune_dataset_1132_v2.csv' 的路徑
         """
         self.csv_path = csv_path
-        # 定義欄位和標籤
-        self.required_cols = ['chapter', 'section', 'all_logs', 'Preview_ChatLog', 'Review_ChatLog', 'Mastery_Level_K4']
-        self.label_map = {"待加強": 0, "尚可": 1, "良好": 2, "精熟": 3}
+        # 定義欄位和標籤 - 更新為新資料集結構
+        self.required_cols = ['chapter', 'section', 'Short_Answer_Log', 'Dialog', 'Mastery_Label']
+        # 3 個掌握度等級：待加強、尚可、精熟
+        self.label_map = {"待加強": 0, "尚可": 1, "精熟": 2}
         self.id2label = {v: k for k, v in self.label_map.items()}
-        self.num_labels = len(self.label_map)
+        self.num_labels = len(self.label_map)  # num_labels = 3
         
         # 這些變數將在 prepare_data() 後被賦值
         self.train_df = None
@@ -154,7 +365,7 @@ class KTDataProcessor:
         try:
             # 建議：加上 encoding='utf-8-sig' 可以處理 Excel 存出的 CSV 常見的 BOM 問題
             # keep_default_na=True 是預設值，會自動識別 'NA', 'NaN' 等
-            df = pd.read_csv(self.csv_path)
+            df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
             print(f"原始資料 '{self.csv_path}' 讀取成功，共 {len(df)} 筆")
         except FileNotFoundError:
             print(f"錯誤：找不到檔案 {self.csv_path}")
@@ -171,26 +382,26 @@ class KTDataProcessor:
 
         # 2. 清理特徵欄位 (非 Label)
         # 目標：填補 NaN 為空字串，並強制轉為 String 型別 (避免數字被當成 float)
-        text_cols = [c for c in self.required_cols if c != 'Mastery_Level_K4']
+        text_cols = [c for c in self.required_cols if c != 'Mastery_Label']
         for col in text_cols:
             # fillna('') 把 NaN 變成空字串
             # astype(str) 確保即使 CSV 裡是數字 123，也會變成字串 "123"
             df[col] = df[col].fillna('').astype(str)
 
-        # 3. 清理標籤欄位 (Mastery_Level_K4)
-        # 步驟 A: 先把 Mastery_Level_K4 本身是 NaN/空值的去掉
-        if df['Mastery_Level_K4'].isnull().any():
-            n_missing = df['Mastery_Level_K4'].isnull().sum()
-            print(f"警告：移除 {n_missing} 筆 'Mastery_Level_K4' 為空的資料")
-            df = df.dropna(subset=['Mastery_Level_K4'])
+        # 3. 清理標籤欄位 (Mastery_Label - 新資料集欄位名稱)
+        # 步驟 A: 先把 Mastery_Label 本身是 NaN/空值的去掉
+        if df['Mastery_Label'].isnull().any():
+            n_missing = df['Mastery_Label'].isnull().sum()
+            print(f"警告：移除 {n_missing} 筆 'Mastery_Label' 為空的資料")
+            df = df.dropna(subset=['Mastery_Label'])
 
         # 步驟 B: 進行 Mapping
-        df['labels'] = df['Mastery_Level_K4'].map(self.label_map)
+        df['labels'] = df['Mastery_Label'].map(self.label_map)
 
-        # 步驟 C: 檢查 Mapping 後是否產生 NaN (代表出現了字典裡沒有的標籤，如 'Unknown')
+        # 步驟 C: 檢查 Mapping 後是否產生 NaN (代表出現了字典裡沒有的標籤)
         if df['labels'].isnull().any():
             invalid_rows = df[df['labels'].isnull()]
-            invalid_values = invalid_rows['Mastery_Level_K4'].unique()
+            invalid_values = invalid_rows['Mastery_Label'].unique()
             print(f"警告：移除 {len(invalid_rows)} 筆無法識別的標籤值")
             print(f"      無法識別的值包含: {invalid_values}")
             df = df.dropna(subset=['labels']).copy() # 這裡 copy 很重要，避免 SettingWithCopyWarning
@@ -208,7 +419,7 @@ class KTDataProcessor:
     def prepare_data(self, test_size=0.2, random_state=42):
         """
         執行資料準備的主要流程：載入、清理、分割。
-        使用 stratify 確保訓練集和驗證集中，四種標籤（待加強、尚可、良好、精熟）的比例相同。
+        使用 stratify 確保訓練集和驗證集中，三種標籤（待加強、尚可、精熟）的比例相同。
         """
         df = self._load_and_clean()
         
@@ -290,15 +501,15 @@ class KTDataProcessor:
         print(f"🔍 檢查超過 {threshold} tokens 的資料詳細資訊：")
         
         for idx, row in df.iterrows():
-            # 重現 KTDynamicDataset            # 重建與訓練時相同的格式化文本
+            # 重建與訓練時相同的格式化文本
             # 注意：必須與 KTDynamicDataset 使用相同格式
+            # 新資料集已將對話整合為單一 Dialog 欄位
             formatted_text = (
                 f"章節 : {row['chapter']}\n"
                 f"知識點 : {row['section']}\n"
                 f"學生掌握度 : [MASK]\n"
-                f"作答紀錄 :\n{row['all_logs']}\n"
-                f"[課前相關對話紀錄]\n{row['Preview_ChatLog']}\n"
-                f"[課後相關對話紀錄]\n{row['Review_ChatLog']}\n"
+                f"簡答題作答紀錄 :\n{row['Short_Answer_Log']}\n"
+                f"對話紀錄 :\n{row['Dialog']}\n"
             )
             
             # 計算長度 (不截斷)
@@ -355,24 +566,22 @@ class KTDynamicDataset(Dataset):
         row = self.data.iloc[index]
 
         # 2. 提取所有需要的欄位 (在這裡處理，確保都是字串)
+        # 新資料集使用 Short_Answer_Log 和 Dialog 欄位
         chapter = str(row['chapter'])
         section = str(row['section'])
-        all_logs = str(row['all_logs'])
-        preview_chat = str(row['Preview_ChatLog'])
-        review_chat = str(row['Review_ChatLog'])
-        mastery_text = str(row['Mastery_Level_K4'])
+        short_answer_log = str(row['Short_Answer_Log'])
+        dialog = str(row['Dialog'])
         label = int(row['labels'])
 
         # 3. 【核心：動態文本合併】
-        # 根據您的範本即時組合字串
+        # 根據新資料集結構組合字串
         # 注意：學生掌握度使用 [MASK] 隱藏，避免資料洩漏
         formatted_text = (
             f"章節 : {chapter}\n"
             f"知識點 : {section}\n"
             f"學生掌握度 : [MASK]\n"
-            f"作答紀錄 :\n{all_logs}\n"
-            f"[課前相關對話紀錄]\n{preview_chat}\n"
-            f"[課後相關對話紀錄]\n{review_chat}\n"
+            f"簡答題作答紀錄 :\n{short_answer_log}\n"
+            f"對話紀錄 :\n{dialog}\n"
         )
 
         # print(f"formatted_text: {formatted_text}, length: {len(formatted_text)}")
@@ -389,8 +598,8 @@ class KTDynamicDataset(Dataset):
 
         # 5. 回傳模型需要的字典 (並移除多餘的維度)
         return {
-            'input_ids': encoding['input_ids'].squeeze(),
-            'attention_mask': encoding['attention_mask'].squeeze(),
+            'input_ids': encoding['input_ids'][0],
+            'attention_mask': encoding['attention_mask'][0],
             'labels': torch.tensor(label, dtype=torch.long)
         }
 
@@ -400,16 +609,18 @@ class BertKTFinetuner:
     功用：主要的協同運作類別。
     負責初始化模型、Tokenizer、Trainer，並執行訓練和評估。
     """
-    def __init__(self, model_name: str, data_processor: KTDataProcessor, training_args: TrainingArguments):
+    def __init__(self, model_name: str, data_processor: KTDataProcessor, training_args: TrainingArguments, max_token_len: int = 512):
         """
         Args:
             model_name (str): 要從 Hugging Face 載入的模型名稱
             data_processor (KTDataProcessor): 已經準備好資料的 DataProcessor 物件
             training_args (TrainingArguments): Hugging Face 的訓練參數
+            max_token_len (int): 最大 Token 長度，預設 512
         """
         self.model_name = model_name
         self.processor = data_processor
         self.training_args = training_args
+        self.max_token_len = max_token_len
         
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"模型將在 {self.device} 上運行")
@@ -434,13 +645,53 @@ class BertKTFinetuner:
     @staticmethod
     def _compute_metrics(eval_pred):
         """
-        [靜態方法] 用於計算評估指標 (準確率)
+        [靜態方法] 用於計算評估指標
+        包括整體 accuracy 和每個類別的 precision, recall, f1-score, accuracy
         """
         logits, labels = eval_pred
         predictions = np.argmax(logits, axis=-1)
-        return {
-            "accuracy": accuracy_score(labels, predictions)
+        
+        # 確保 labels 和 predictions 是 numpy arrays
+        labels = np.array(labels)
+        predictions = np.array(predictions)
+        
+        # 整體 accuracy
+        overall_acc = accuracy_score(labels, predictions)
+        
+        # 每個類別的 precision, recall, f1-score
+        # average=None 會返回每個類別的指標
+        precision, recall, f1, support = precision_recall_fscore_support(
+            labels, predictions, labels=[0, 1, 2], average=None, zero_division=0
+        )
+        
+        # 定義類別名稱（對應 label 0, 1, 2）- 3 個等級
+        label_names = ["待加強", "尚可", "精熟"]
+        
+        # 計算 macro-F1（更適合不平衡的三分類問題）
+        macro_f1 = f1.mean()
+        
+        # 建立結果字典
+        metrics = {
+            "accuracy": overall_acc,
+            "macro_f1": macro_f1  # 用於 Optuna 優化
         }
+        
+        # 為每個類別計算指標
+        for idx, label_name in enumerate(label_names):
+            metrics[f"{label_name}_precision"] = precision[idx]
+            metrics[f"{label_name}_recall"] = recall[idx]
+            metrics[f"{label_name}_f1"] = f1[idx]
+            
+            # 計算每個類別的 accuracy
+            # accuracy = 該類別預測正確的數量 / 該類別的總數量
+            class_mask = labels == idx
+            if class_mask.sum() > 0:
+                class_acc = (predictions[class_mask] == labels[class_mask]).sum() / class_mask.sum()
+                metrics[f"{label_name}_accuracy"] = float(class_acc)
+            else:
+                metrics[f"{label_name}_accuracy"] = 0.0
+        
+        return metrics
 
     def run_finetuning(self):
         """
@@ -450,8 +701,8 @@ class BertKTFinetuner:
         train_df, val_df = self.processor.get_dataframes()
         
         # 2. 建立 Dataset 物件
-        train_dataset = KTDynamicDataset(train_df, self.tokenizer)
-        val_dataset = KTDynamicDataset(val_df, self.tokenizer)
+        train_dataset = KTDynamicDataset(train_df, self.tokenizer, max_token_len=self.max_token_len)
+        val_dataset = KTDynamicDataset(val_df, self.tokenizer, max_token_len=self.max_token_len)
 
         # 3. 初始化 Trainer
         self.trainer = Trainer(
@@ -471,10 +722,20 @@ class BertKTFinetuner:
         print("--- 評估最佳模型 ---")
         eval_results = self.trainer.evaluate()
         print(eval_results)
+        
+        # 6. 生成混淆矩陣
+        print("\n--- 生成混淆矩陣 ---")
+        val_predictions = self.trainer.predict(val_dataset)
+        y_pred = np.argmax(val_predictions.predictions, axis=1)
+        y_true = val_predictions.label_ids
+        
+        # 使用 TrainingVisualizer 繪製混淆矩陣
+        visualizer = TrainingVisualizer(self.training_args.output_dir)
+        class_names = [self.processor.id2label[i] for i in range(self.processor.num_labels)]
+        visualizer.plot_confusion_matrix(y_true, y_pred, class_names)
 
-        # 6. 視覺化訓練結果 (使用新 Class)
+        # 7. 視覺化訓練結果 (重用上面的 visualizer)
         if self.trainer.state.log_history:
-            visualizer = TrainingVisualizer(self.training_args.output_dir)
             visualizer.plot(self.trainer.state.log_history)
         else:
             print("⚠️ 無訓練紀錄，跳過繪圖。")
@@ -492,27 +753,317 @@ class BertKTFinetuner:
         self.trainer.save_model(save_path)
         self.tokenizer.save_pretrained(save_path)
         print(f"模型與 Tokenizer 已儲存至: {save_path}")
+    
+    def run_finetuning_for_optuna(self):
+        """
+        簡化版訓練流程（用於 Optuna 超參數搜索）
+        不生成視覺化圖表以加快速度
+        """
+        # 資料已在 objective 函數中準備好，這裡直接取用
+        train_df, val_df = self.processor.get_dataframes()
+        
+        # 2. 建立 Dataset
+        train_dataset = KTDynamicDataset(train_df, self.tokenizer, max_token_len=self.max_token_len)
+        val_dataset = KTDynamicDataset(val_df, self.tokenizer, max_token_len=self.max_token_len)
+        
+        # 3. 初始化 Trainer
+        self.trainer = Trainer(
+            model=self.model,
+            args=self.training_args,
+            train_dataset=train_dataset,
+            eval_dataset=val_dataset,
+            compute_metrics=self._compute_metrics,
+        )
+        
+        # 4. 訓練
+        self.trainer.train()
+        
+        # 5. 評估
+        eval_results = self.trainer.evaluate()
+        
+        return eval_results
+
+
+class HyperparameterSearcher:
+    """
+    Optuna 超參數搜索器
+    
+    通用的超參數搜索類，可用於不同的模型類型（BERT, RoBERTa, Longformer等）
+    """
+    
+    def __init__(self, model_class, data_processor_class, search_space: dict = None):
+        """
+        Args:
+            model_class: 模型訓練類（如 BertKTFinetuner）
+            data_processor_class: 資料處理類（如 KTDataProcessor）
+            search_space: 超參數搜索空間配置
+        """
+        self.model_class = model_class
+        self.data_processor_class = data_processor_class
+        
+        # 默認搜索空間
+        self.search_space = search_space or {
+            "learning_rate": {"low": 1e-5, "high": 1e-4, "log": True},
+            "num_train_epochs": {"values": [5, 10, 15]},
+            "per_device_train_batch_size": {"values": [4, 8, 16]},
+            "warmup_steps": {"values": [50, 100, 150, 200]},
+            "weight_decay": {"low": 0.0, "high": 0.1}
+        }
+    
+    def run_search(
+        self,
+        csv_path: str,
+        model_name: str = "bert-base-chinese",
+        output_base_dir: str = "./optuna_results",
+        n_trials: int = 15,
+        study_name: str = "hp_search"
+    ):
+        # 執行超參數搜索
+        print("開始 Optuna 超參數搜索\n")
+        print(f"將嘗試 {n_trials} 組參數組合\n")
+        
+        os.makedirs(output_base_dir, exist_ok=True)
+        
+        study = optuna.create_study(
+            study_name=study_name,
+            direction="maximize",
+            pruner=optuna.pruners.MedianPruner(n_startup_trials=3, n_warmup_steps=5)
+        )
+        
+        def objective(trial):
+            params = self._suggest_parameters(trial)
+            trial_output_dir = os.path.join(output_base_dir, f"trial_{trial.number}")
+            os.makedirs(trial_output_dir, exist_ok=True)
+            
+            training_args_dict = {
+                "output_dir": trial_output_dir,
+                "num_train_epochs": params["num_train_epochs"],
+                "per_device_train_batch_size": params["per_device_train_batch_size"],
+                "per_device_eval_batch_size": 4,
+                "learning_rate": params["learning_rate"],
+                "warmup_steps": params["warmup_steps"],
+                "weight_decay": params["weight_decay"],
+                "logging_dir": f"{trial_output_dir}/logs",
+                "logging_steps": 10,
+                "eval_strategy": "epoch",
+                "save_strategy": "epoch",
+                "load_best_model_at_end": True,
+                "metric_for_best_model": "macro_f1",
+                "report_to": "none",
+                "save_total_limit": 2,
+                "seed": 42,
+                "data_seed": 42
+            }
+            
+            try:
+                self._print_trial_info(trial.number, params)
+                
+                data_processor = self.data_processor_class(csv_path=csv_path)
+                data_processor.prepare_data(test_size=0.2, random_state=42)
+                
+                training_args = TrainingArguments(**training_args_dict)
+                
+                finetuner = self.model_class(
+                    model_name=model_name,
+                    data_processor=data_processor,
+                    training_args=training_args,
+                    max_token_len=512
+                )
+                
+                eval_results = finetuner.run_finetuning_for_optuna()
+                score = eval_results.get("eval_macro_f1", eval_results["eval_accuracy"])
+                
+                print(f"Trial {trial.number} 完成: macro_f1 = {score:.4f}")
+                
+                trial.report(score, step=params["num_train_epochs"])
+                if trial.should_prune():
+                    raise optuna.TrialPruned()
+                
+                return score
+                
+            except Exception as e:
+                print(f"❌ Trial {trial.number} 失敗: {str(e)}")
+                raise
+        
+        study.optimize(objective, n_trials=n_trials, show_progress_bar=True, catch=(Exception,))
+        self._print_results(study, output_base_dir)
+        
+        return study
+    
+    def _suggest_parameters(self, trial):
+        params = {}
+        for param_name, config in self.search_space.items():
+            if "values" in config:
+                params[param_name] = trial.suggest_categorical(param_name, config["values"])
+            elif "low" in config and "high" in config:
+                if config.get("log", False):
+                    params[param_name] = trial.suggest_float(
+                        param_name, config["low"], config["high"], log=True
+                    )
+                else:
+                    params[param_name] = trial.suggest_float(
+                        param_name, config["low"], config["high"]
+                    )
+        return params
+    
+    def _print_trial_info(self, trial_number, params):
+        print(f"{'='*80}")
+        print(f"Trial {trial_number}: 測試參數組合")
+        print(f"  Learning Rate: {params['learning_rate']:.2e}")
+        print(f"  Epochs: {params['num_train_epochs']}")
+        print(f"  Batch Size: {params['per_device_train_batch_size']}")
+        print(f"  Warmup Steps: {params['warmup_steps']}")
+        print(f"  Weight Decay: {params['weight_decay']:.4f}")
+        print(f"{'='*80}")
+    
+    def _print_results(self, study, output_base_dir):
+        print(f"{'='*80}")
+        print(f"🎉 超參數搜索完成!")
+        print(f"{'='*80}")
+        
+        print(f"📊 最佳參數:")
+        for key, value in study.best_params.items():
+            if 'learning_rate' in key:
+                print(f"  {key}: {value:.2e}")
+            else:
+                print(f"  {key}: {value}")
+        
+        print(f"✅ 最佳驗證 macro-F1: {study.best_value:.4f}")
+        print(f"✅ 最佳 Trial 編號: {study.best_trial.number}")
+        
+        study_results_path = os.path.join(output_base_dir, "study_results.csv")
+        df = study.trials_dataframe()
+        df.to_csv(study_results_path, index=False)
+        print(f"💾 Study 結果已儲存至: {study_results_path}")
+        
+        try:
+            print(f"📈 正在生成可視化圖表...")
+            fig1 = plot_optimization_history(study)
+            fig1_path = os.path.join(output_base_dir, "optimization_history.png")
+            fig1.write_image(fig1_path)
+            print(f"  ✅ 優化歷程圖: {fig1_path}")
+            
+            if len(study.trials) >= 3:
+                fig2 = plot_param_importances(study)
+                fig2_path = os.path.join(output_base_dir, "param_importances.png")
+                fig2.write_image(fig2_path)
+                print(f"  ✅ 參數重要性圖: {fig2_path}")
+        except Exception as e:
+            print(f"⚠️ 可視化生成失敗: {e}")
 
 
 def ensure_dir_exists(path: str):
-    """
-    確保目標資料夾及其所有父資料夾存在。
-    如果不存在，則遞迴創建。
-    
-    Args:
-        path (str): 目標資料夾路徑
-    """
+    """確保目標資料夾及其所有父資料夾存在"""
     os.makedirs(path, exist_ok=True)
     print(f"✓ 資料夾已確認存在: {path}")
 
-# --- 主程式執行區塊 ---
+
+
 if __name__ == "__main__":
+    
+    # ========================================
+    # 🔧 執行模式選擇
+    # ========================================
+    # MODE = "train"   # 正常訓練模式
+    MODE = "search"    # 超參數搜索模式
+    
+    if MODE == "search":
+        # ========================================
+        # 🔍 超參數搜索模式
+        # ========================================
+        print("\n" + "="*80)
+        print("🔍 Optuna 超參數搜索模式")
+        print("=" *80 + "\n")
+        
+        SEARCH_CONFIG = {
+            "csv_path": "datasets/finetune_dataset_1132_v2.csv",
+            "model_name": "bert-base-chinese",
+            "output_base_dir": "./optuna_results",
+            "n_trials": 15,  # 嘗試 15 組參數組合
+            "study_name": "bert_kt_hp_search"
+        }
+        
+        searcher = HyperparameterSearcher(
+            model_class=BertKTFinetuner,
+            data_processor_class=KTDataProcessor
+        )
+        study = searcher.run_search(**SEARCH_CONFIG)
+        
+        print("\n" + "="*80)
+        print("✅ 超參數搜索完成！")
+        print(f"📁 結果已儲存至: {SEARCH_CONFIG['output_base_dir']}")
+        print("="*80 + "\n")
+        
+        # ========================================
+        # 🚀 自動使用最佳參數重新訓練
+        # ========================================
+        print("🚀 使用最佳參數進行完整訓練...\n")
+        
+        best_params = study.best_params
+        print("📊 最佳參數：")
+        for k, v in best_params.items():
+            print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
+        print()
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        OUTPUT_DIR = f"./results/best_model_{timestamp}"
+        FINAL_MODEL_PATH = f"{OUTPUT_DIR}/final_model"
+        
+        ensure_dir_exists(OUTPUT_DIR)
+        ensure_dir_exists(FINAL_MODEL_PATH)
+        
+        full_train_epochs = 60
+        
+        training_args_dict = {
+            "output_dir": OUTPUT_DIR,
+            "num_train_epochs": full_train_epochs,
+            "per_device_train_batch_size": best_params.get("per_device_train_batch_size", 8),
+            "per_device_eval_batch_size": 4,
+            "learning_rate": best_params.get("learning_rate", 3e-5),
+            "warmup_steps": best_params.get("warmup_steps", 100),
+            "weight_decay": best_params.get("weight_decay", 0.01),
+            "logging_dir": f"{OUTPUT_DIR}/logs",
+            "logging_steps": 10,
+            "eval_strategy": "epoch",
+            "save_strategy": "epoch",
+            "load_best_model_at_end": True,
+            "metric_for_best_model": "macro_f1",
+            "report_to": "none",
+            "seed": 42,
+            "data_seed": 42
+        }
+        
+        data_processor = KTDataProcessor(csv_path=SEARCH_CONFIG['csv_path'])
+        data_processor.prepare_data(test_size=0.2, random_state=42)
+        
+        training_args = TrainingArguments(**training_args_dict)
+        finetuner = BertKTFinetuner(
+            model_name=SEARCH_CONFIG['model_name'],
+            data_processor=data_processor,
+            training_args=training_args,
+            max_token_len=512
+        )
+        
+        finetuner.run_finetuning()
+        finetuner.save_model(save_path=FINAL_MODEL_PATH)
+        
+        print(f"\n" + "="*80)
+        print(f"🎉 完整訓練完成！")
+        print(f"📁 最終模型已儲存至: {FINAL_MODEL_PATH}")
+        print(f"📊 使用的最佳參數來自 Optuna 搜索")
+        print("="*80)
+        
+        sys.exit(0)
+    
+    # ========================================
+    # 🎯 正常訓練模式
+    # ========================================
     
     # --- 1. 定義所有設定 ---
     
     # 檔案和模型路徑
     CONFIG = {
-        "csv_path": "datasets/finetune_dataset_k4_global.csv",
+        "csv_path": "datasets/finetune_dataset_1132_v2.csv",  # 更新為新資料集
         "model_name": "bert-base-chinese",
         "output_base_dir": "./results",
         "final_model_dir": "final_model",
@@ -538,30 +1089,30 @@ if __name__ == "__main__":
     # 可以在這裡調整訓練的超參數
     training_args_dict = {
         "output_dir": OUTPUT_DIR,
-        "num_train_epochs": 3,              # 訓練輪數
-        "per_device_train_batch_size": 4,   # 每個 GPU/CPU 的 batch size
-        "per_device_eval_batch_size": 4,    # 驗證時的 batch size
-        "learning_rate": 5e-5,              # 學習率
-        "warmup_steps": 50,                 # 預熱步數
-        "weight_decay": 0.01,               # 權重衰減
-        "logging_dir": f"{OUTPUT_DIR}/logs",# TensorBoard 日誌目錄
-        "logging_steps": 10,                # 每幾步紀錄一次 log
-        "eval_strategy": "epoch",           # 每個 epoch 結束後進行評估
-        "save_strategy": "epoch",           # 每個 epoch 結束後儲存 checkpoint
-        "load_best_model_at_end": True,     # 訓練結束後載入表現最好的模型
-        "metric_for_best_model": "accuracy",# 以 accuracy 作為評估標準
-        "report_to": "none"                 # 不上傳到 WandB 等平台
+        "num_train_epochs": 60,                 # 訓練輪數
+        "per_device_train_batch_size": 4,       # 每個 GPU/CPU 的 batch size
+        "per_device_eval_batch_size": 4,        # 驗證時的 batch size
+        "learning_rate": 5e-5,                  # 學習率
+        "warmup_steps": 50,                     # 預熱步數
+        "weight_decay": 0.01,                   # 權重衰減
+        "logging_dir": f"{OUTPUT_DIR}/logs",    # TensorBoard 日誌目錄
+        "logging_steps": 10,                    # 每幾步紀錄一次 log
+        "eval_strategy": "epoch",         # 每個 epoch 結束後進行評估
+        "save_strategy": "epoch",               # 每個 epoch 結束後儲存 checkpoint
+        "load_best_model_at_end": True,         # 訓練結束後載入表現最好的模型
+        "metric_for_best_model": "macro_f1",  # 使用 macro-F1（更適合不平衡分類）
+        "report_to": "none",
+        "seed": 42,
+        "data_seed": 42
     }
     
     # --- 2. 執行資料處理 ---
     
     # 初始化資料處理器
-    # 初始化資料處理器
     data_processor = KTDataProcessor(csv_path=CONFIG['csv_path'])
-    # 執行資料準備 (載入、清理、分割)
     data_processor.prepare_data(test_size=CONFIG['test_size'])
     
-    # 新增：執行 Token 長度分析
+    # Token 長度分析
     ratio, max_len = data_processor.analyze_token_lengths(CONFIG['model_name'], threshold=CONFIG['max_token_len'])
     
     if ratio > 5.0:
@@ -571,18 +1122,15 @@ if __name__ == "__main__":
         print(f"\n✅ 資料長度檢查通過 (超過 512 的比例為 {ratio:.2f}%)")
 
     # --- 3. 執行模型 Finetune ---
-    
-    # 建立 TrainingArguments 物件
     training_args = TrainingArguments(**training_args_dict)
     
-    # 初始化 Finetuner
     finetuner = BertKTFinetuner(
         model_name=CONFIG['model_name'],
-        data_processor=data_processor, # 傳入處理好的資料
-        training_args=training_args
+        data_processor=data_processor,
+        training_args=training_args,
+        max_token_len=CONFIG['max_token_len']
     )
     
-    # 開始訓練
     finetuner.run_finetuning()
     
     # --- 4. 儲存最終模型 ---
