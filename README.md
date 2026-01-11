@@ -1,46 +1,62 @@
-# BERT 知識追蹤 (Knowledge Tracing) 微調專案
+# BERT/RoBERTa 知識追蹤 (Knowledge Tracing) 微調專案
 
-這是一個使用 BERT 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、精熟）。
+這是一個使用 BERT 和 RoBERTa 進行知識追蹤的微調專案，目標是根據學生的學習資料預測其掌握度（待加強、尚可、精熟）。支援雙模型比較實驗，自動找出最佳模型。
 
-## 🌟 最新更新
+## 🌟 最新更新 (2026-01-11)
 
+- 🆕 **新增 RoBERTa 模型支援** - 支援 `hfl/chinese-roberta-wwm-ext`
+- 🆕 **雙模型自動比較** - 自動執行 BERT vs RoBERTa 性能比較
 - ✅ 整合 **Optuna 超參數搜索**，自動尋找最佳訓練參數
+- ✅ **磁碟空間優化** - 每次實驗從 200GB 降至 5GB
 - ✅ 更新為 **3 級掌握度**（待加強、尚可、精熟）
 - ✅ 使用新資料集 `finetune_dataset_1132_v2.csv`
-- ✅ 最佳 macro-F1: **97.62%**
+- 🏆 **最佳成績**: RoBERTa Macro F1 = **99.47%** | BERT Macro F1 = **95.55%**
 
 ## 📁 專案結構
 
 ```
 finetune_KT/
 │
-├── 📄 finetune_bert.py              # 主程式：資料處理、Dataset、訓練邏輯、Optuna 搜索
-│   ├── TrainingVisualizer          # 訓練結果視覺化、中文字體支援
+├── 📄 finetune_bert.py              # 主程式：支援 BERT/RoBERTa 雙模型比較
+│   ├── MODEL_CONFIGS              # 模型配置字典（BERT, RoBERTa）
+│   ├── TrainingVisualizer          # 訓練結果視覺化、動態模型名稱支援
 │   ├── KTDataProcessor             # 資料處理類別
 │   ├── KTDynamicDataset            # PyTorch Dataset 類別
-│   ├── BertKTFinetuner             # 訓練器類別
-│   └── HyperparameterSearcher      # Optuna 超參數搜索器
+│   ├── KTFinetuner                 # 通用訓練器（支援多模型）
+│   ├── HyperparameterSearcher      # Optuna 超參數搜索器
+│   └── generate_comparison_report  # 雙模型比較報告生成
 │
 ├── 📄 view_training_history.py      # 訓練結果事後檢視工具
 ├── 📄 requirements.txt              # Python 套件依賴
 ├── 📄 .gitignore                    # Git 忽略文件配置
 ├── 📄 README.md                     # 專案說明文件（本文件）
 │
+├── 📁 docs/                         # 說明文件資料夾
+│   ├── roberta_comparison_walkthrough.md          # RoBERTa 實驗完整報告
+│   └── roberta_comparison_implementation_plan.md  # 實作計畫
+│
 ├── 📁 datasets/                     # 資料集資料夾
-│   └── 📄 finetune_dataset_1132_v2.csv  # 訓練資料集
+│   └── 📄 finetune_dataset_1132_v2.csv  # 訓練資料集（725 筆）
 │
 ├── 📁 optuna_results/              # Optuna 搜索結果
-│   └── 📄 study_results.csv          # 所有 trials 詳細結果
+│   ├── 📁 bert/
+│   │   └── study_results.csv        # BERT Optuna 結果
+│   └── 📁 roberta/
+│       └── study_results.csv        # RoBERTa Optuna 結果
 │
 ├── 📁 results/                      # 訓練結果資料夾
-│   └── 📁 best_model_{timestamp}/   # 最佳模型和視覺化圖表
+│   ├── 📁 bert-base-chinese_{timestamp}/   # BERT 訓練結果
+│   ├── 📁 roberta-chinese_{timestamp}/     # RoBERTa 訓練結果
+│   └── 📄 model_comparison_report.csv      # 雙模型比較報告
 │
 └── 📁 venv/                         # Python 虛擬環境（git ignored）
 ```
 
-## 🧠 模型說明
+## 🧠 支援的模型
 
-### 使用的模型：bert-base-chinese
+本專案支援多種 Transformer 模型，並提供自動化比較功能。
+
+### 1. BERT (bert-base-chinese)
 
 **基本資訊**:
 - 📌 **模型名稱**: `bert-base-chinese`
@@ -55,20 +71,49 @@ finetune_KT/
 - ✅ 模型較小，訓練速度快
 - ✅ 適合中文文本分類任務
 
-### 🤔 為什麼選擇 bert-base-chinese？
+### 2. RoBERTa (hfl/chinese-roberta-wwm-ext)
 
-1. **中文優化**: 專為中文設計，效果優於多語言模型
-2. **模型大小**: 適中的模型大小，訓練和推理速度快
-3. **易於使用**: Hugging Face 官方支援，文檔完整
-4. **資源需求**: 對硬體要求較低，普通 GPU 即可訓練
+**基本資訊**:
+- 📌 **模型名稱**: `hfl/chinese-roberta-wwm-ext`
+- 📌 **架構**: 基於 BERT 架構（使用 BertConfig）
+- 📌 **詞彙表大小**: 21,128 個 tokens
+- 📌 **最大序列長度**: 512 tokens
+- 📌 **總參數量**: ~102M
+
+**特點**:
+- ✅ **Whole Word Masking (WWM)**: 更適合中文的遮罩策略
+- ✅ **更好的訓練策略**: 移除 NSP 任務，使用更大 batch size
+- ✅ **更長的訓練時間**: 在更多數據上訓練
+- ✅ **實驗結果優異**: Macro F1 = **99.47%** (vs BERT 95.55%)
+
+---
+
+### 🏆 模型比較實驗結果
+
+基於 `finetune_dataset_1132_v2.csv` (725 筆資料)，使用 Optuna 自動超參數搜索：
+
+| 模型 | Macro F1 | 準確率 | 待加強 F1 | 尚可 F1 | 精熟 F1 |
+|------|---------|--------|----------|---------|--------|
+| **BERT** | 95.55% | 97.24% | 97.39% | 99.26% | 90.00% |
+| **RoBERTa** | **99.47%** ✨ | **99.31%** ✨ | **99.16%** | 99.26% | **100%** 🎯 |
+
+**關鍵發現**:
+- ✅ RoBERTa 在所有指標上都優於或等於 BERT
+- ✅ RoBERTa 在「精熟」類別達到 **100% F1-Score**
+- ✅ Macro F1 提升 **4.11%** (95.55% → 99.47%)
+
+詳細實驗報告請參考：[docs/roberta_comparison_walkthrough.md](docs/roberta_comparison_walkthrough.md)
+
+---
 
 ### 🚀 其他可選模型
 
-| 模型名稱 | 特點 | 適用場景 |
-|---------|------|---------|
-| `bert-base-multilingual-cased` | 支援104種語言 | 多語言混合文本 |
-| `hfl/chinese-bert-wwm-ext` | 全詞遮罩，效果更好 | 追求更高準確率 |
-| `hfl/chinese-roberta-wwm-ext` | RoBERTa 架構 | 長文本理解 |
+| 模型名稱 | 特點 | 適用場景 | 專案支援 |
+|---------|------|---------|----------|
+| `bert-base-chinese` | 基礎中文 BERT | 一般中文任務 | ✅ |
+| `hfl/chinese-roberta-wwm-ext` | RoBERTa + WWM | 追求最高準確率 | ✅ |
+| `bert-base-multilingual-cased` | 支援104種語言 | 多語言混合文本 | ⚪ |
+| `hfl/chinese-bert-wwm-ext` | BERT + WWM | 平衡性能與速度 | ⚪ |
 
 ## 🛠 環境設置
 
