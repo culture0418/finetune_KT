@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>完整文本分析</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+               max-width: 1200px; margin: 0 auto; padding: 20px; background: #f9fafb; }
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; 
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        h1 { color: #1f2937; margin-bottom: 8px; }
+        h2 { color: #374151; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }
+        .prediction { font-size: 24px; font-weight: bold; color: #059669; }
+        .original-text { background: #f3f4f6; padding: 16px; border-radius: 8px; 
+                         line-height: 1.8; white-space: pre-wrap; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px 8px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; }
+        .legend { display: flex; gap: 20px; margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-box { width: 20px; height: 20px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔍 完整文本分析</h1>
+        <p style="color: #6b7280;">模型可解釋性分析報告</p>
+    </div>
+    
+    <div class="card">
+        <h2>📊 預測結果</h2>
+        <div class="prediction">尚可</div>
+        <div style="margin-top: 16px;">
+            <strong>各類別機率：</strong>
+            <div style="margin: 5px 0;"><span style="color: #6b7280; font-weight: normal;">待加強: 0.05%</span></div><div style="margin: 5px 0;"><span style="color: #22c55e; font-weight: bold;">尚可: 99.92%</span></div><div style="margin: 5px 0;"><span style="color: #6b7280; font-weight: normal;">精熟: 0.03%</span></div>
+        </div>
+    </div>
+    
+    <div class='card'><h2>📝 原始文本（關鍵字高亮）</h2><div class='legend'><div class='legend-item'><div class='legend-box' style='background: rgba(34, 197, 94, 0.5);'></div><span>正向影響（支持預測）</span></div><div class='legend-item'><div class='legend-box' style='background: rgba(239, 68, 68, 0.5);'></div><span>負向影響（反對預測）</span></div></div><div class='original-text' style='margin-top: 16px;'>【章節】A_機器學習-監督式學習
+【知識點】人工<span style="background-color: rgba(34, 197, 94, 0.0040915456501218845); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0020">智慧</span>的起源
+
+【簡答題記錄】
+［題目］：（簡答題）艾倫．圖靈（Alan Turing）於 1950 年提出的「圖靈測試」，其判斷<span style="background-color: rgba(239, 68, 68, 0.008837899521274109); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0044">電腦</span>是否具備<span style="background-color: rgba(34, 197, 94, 0.0040915456501218845); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0020">智慧</span>的標準是<span style="background-color: rgba(34, 197, 94, 0.008209819967958778); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0041">什麼</span>？
+［學生答案］：<span style="background-color: rgba(239, 68, 68, 0.008837899521274109); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0044">電腦</span>能否透過<span style="background-color: rgba(34, 197, 94, 0.017155911064348835); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0086">文字</span>達成<span style="background-color: rgba(34, 197, 94, 0.011285272176511355); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0056">無法分辨</span>的<span style="background-color: rgba(239, 68, 68, 0.008745481930408713); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0044">人類表達方式</span>與<span style="background-color: rgba(34, 197, 94, 0.0040915456501218845); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0020">智慧</span>
+［學生表現］：<span style="background-color: rgba(34, 197, 94, 0.8); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.9311">Partially Correct</span>
+［題目］：（簡答題）根據「AI 發展簡史」圖表，人工<span style="background-color: rgba(34, 197, 94, 0.0040915456501218845); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0020">智慧</span>的發展歷程主要被劃分為哪三個時期
+［學生答案］：<span style="background-color: rgba(239, 68, 68, 0.012591117501135658); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0063">推理期</span>、<span style="background-color: rgba(34, 197, 94, 0.015218663586424482); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0076">知識期</span>、<span style="background-color: rgba(34, 197, 94, 0.006231602145000595); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0031">學習期</span>
+［學生表現］：<span style="background-color: rgba(34, 197, 94, 0.01109717109764786); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0055">Correct</span>
+
+【對話記錄】
+[課後對話]
+[學生]: <span style="background-color: rgba(239, 68, 68, 0.011360067874117228); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0057">偏置</span><span style="background-color: rgba(34, 197, 94, 0.014763990974405065); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0074">Bias</span>是<span style="background-color: rgba(34, 197, 94, 0.008209819967958778); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0041">什麼</span>?
+[AI Tutor]: <span style="background-color: rgba(239, 68, 68, 0.011360067874117228); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0057">偏置</span>（<span style="background-color: rgba(34, 197, 94, 0.014763990974405065); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0074">Bias</span>）是神經網絡中的一個重要參數...
+[學生]: <span style="background-color: rgba(34, 197, 94, 0.009179224504496843); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0046">激活函數</span>和<span style="background-color: rgba(239, 68, 68, 0.011360067874117228); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0057">偏置</span><span style="background-color: rgba(34, 197, 94, 0.014763990974405065); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0074">Bias</span>的<span style="background-color: rgba(34, 197, 94, 0.027553389041822654); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0138">差異</span>
+[AI Tutor]: <span style="background-color: rgba(34, 197, 94, 0.009179224504496843); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0046">激活函數</span>和<span style="background-color: rgba(239, 68, 68, 0.011360067874117228); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0057">偏置</span>（<span style="background-color: rgba(34, 197, 94, 0.014763990974405065); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0074">Bias</span>）在神經網絡中...</div></div>
+    
+    <div class="card">
+        <h2>📈 特徵重要性</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>關鍵詞</th>
+                    <th style="text-align: right;">權重</th>
+                    <th>影響程度</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Partially Correct</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.9311</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 150px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">差異</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0138</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 2.7553389041822656px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">文字</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0086</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.7155911064348834px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">知識期</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0076</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.5218663586424481px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Bias</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0074</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.4763990974405066px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">推理期</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0063</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.2591117501135658px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">偏置</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0057</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.1360067874117228px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">無法分辨</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0056</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.1285272176511354px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Correct</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0055</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 1.109717109764786px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">激活函數</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0046</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.9179224504496843px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">電腦</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0044</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.8837899521274108px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">人類表達方式</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0044</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.8745481930408713px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">什麼</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0041</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.8209819967958778px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">學習期</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0031</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.6231602145000595px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">智慧</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0020</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.40915456501218844px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="card" style="text-align: center; color: #9ca3af; font-size: 12px;">
+        Generated by LIME Explainer | 2026-01-11 17:53:38
+    </div>
+</body>
+</html>

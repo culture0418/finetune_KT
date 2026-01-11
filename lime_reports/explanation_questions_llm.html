@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>學生提問分析</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; 
+               max-width: 1200px; margin: 0 auto; padding: 20px; background: #f9fafb; }
+        .card { background: white; border-radius: 12px; padding: 24px; margin-bottom: 20px; 
+                box-shadow: 0 1px 3px rgba(0,0,0,0.1); }
+        h1 { color: #1f2937; margin-bottom: 8px; }
+        h2 { color: #374151; border-bottom: 2px solid #e5e7eb; padding-bottom: 8px; }
+        .prediction { font-size: 24px; font-weight: bold; color: #059669; }
+        .original-text { background: #f3f4f6; padding: 16px; border-radius: 8px; 
+                         line-height: 1.8; white-space: pre-wrap; font-size: 14px; }
+        table { width: 100%; border-collapse: collapse; }
+        th { text-align: left; padding: 12px 8px; background: #f9fafb; border-bottom: 2px solid #e5e7eb; }
+        .legend { display: flex; gap: 20px; margin-top: 10px; }
+        .legend-item { display: flex; align-items: center; gap: 8px; }
+        .legend-box { width: 20px; height: 20px; border-radius: 4px; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>🔍 學生提問分析</h1>
+        <p style="color: #6b7280;">模型可解釋性分析報告</p>
+    </div>
+    
+    <div class="card">
+        <h2>📊 預測結果</h2>
+        <div class="prediction">精熟</div>
+        <div style="margin-top: 16px;">
+            <strong>各類別機率：</strong>
+            <div style="margin: 5px 0;"><span style="color: #6b7280; font-weight: normal;">待加強: 0.11%</span></div><div style="margin: 5px 0;"><span style="color: #6b7280; font-weight: normal;">尚可: 2.33%</span></div><div style="margin: 5px 0;"><span style="color: #22c55e; font-weight: bold;">精熟: 97.56%</span></div>
+        </div>
+    </div>
+    
+    <div class='card'><h2>📝 原始文本（關鍵字高亮）</h2><div class='legend'><div class='legend-item'><div class='legend-box' style='background: rgba(34, 197, 94, 0.5);'></div><span>正向影響（支持預測）</span></div><div class='legend-item'><div class='legend-box' style='background: rgba(239, 68, 68, 0.5);'></div><span>負向影響（反對預測）</span></div></div><div class='original-text' style='margin-top: 16px;'>[課後對話]
+[學生]: <span style="background-color: rgba(239, 68, 68, 0.0014220313706369795); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0007">偏置</span><span style="background-color: rgba(239, 68, 68, 0.0018012012103959113); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0009">Bias</span>是<span style="background-color: rgba(239, 68, 68, 0.0008274883515426342); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0004">什麼</span>?
+[AI Tutor]: <span style="background-color: rgba(239, 68, 68, 0.0014220313706369795); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0007">偏置</span>（<span style="background-color: rgba(239, 68, 68, 0.0018012012103959113); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0009">Bias</span>）是神經網絡中的一個重要參數...
+[學生]: <span style="background-color: rgba(34, 197, 94, 0.001801791804980191); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0009">激活函數</span>和<span style="background-color: rgba(239, 68, 68, 0.0014220313706369795); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0007">偏置</span><span style="background-color: rgba(239, 68, 68, 0.0018012012103959113); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0009">Bias</span>的<span style="background-color: rgba(34, 197, 94, 0.0008606135514425753); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0004">差異</span>
+[AI Tutor]: <span style="background-color: rgba(34, 197, 94, 0.001801791804980191); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: 0.0009">激活函數</span>和<span style="background-color: rgba(239, 68, 68, 0.0014220313706369795); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0007">偏置</span>（<span style="background-color: rgba(239, 68, 68, 0.0018012012103959113); padding: 2px 4px; border-radius: 3px; border: 1px solid rgba(0,0,0,0.1);" title="Weight: -0.0009">Bias</span>）在神經網絡中...</div></div>
+    
+    <div class="card">
+        <h2>📈 特徵重要性</h2>
+        <table>
+            <thead>
+                <tr>
+                    <th>關鍵詞</th>
+                    <th style="text-align: right;">權重</th>
+                    <th>影響程度</th>
+                </tr>
+            </thead>
+            <tbody>
+                
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">激活函數</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0009</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.18017918049801912px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">Bias</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0009</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.18012012103959113px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">偏置</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0007</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.14220313706369794px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">差異</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #22c55e;">+0.0004</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.08606135514425753px; height: 16px; background-color: #22c55e; 
+                                float: left; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            <tr>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb;">什麼</td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; text-align: right;">
+                    <span style="color: #ef4444;">-0.0004</span>
+                </td>
+                <td style="padding: 8px; border-bottom: 1px solid #e5e7eb; width: 200px;">
+                    <div style="width: 0.08274883515426343px; height: 16px; background-color: #ef4444; 
+                                float: right; border-radius: 3px;"></div>
+                </td>
+            </tr>
+            </tbody>
+        </table>
+    </div>
+    
+    <div class="card" style="text-align: center; color: #9ca3af; font-size: 12px;">
+        Generated by LIME Explainer | 2026-01-11 17:53:38
+    </div>
+</body>
+</html>

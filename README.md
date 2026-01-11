@@ -229,6 +229,118 @@ label_map = {0: "待加強", 1: "尚可", 2: "良好", 3: "精熟"}
 print(f"預測結果: {label_map[prediction]}")
 ```
 
+---
+
+## 🔮 模型推理 (Inference)
+
+### 使用 Python API
+
+```python
+from inference import RoBERTaInference
+
+# 初始化推理引擎
+model_path = "results/roberta-chinese_20260111_034253/final_model/"
+engine = RoBERTaInference(model_path)
+
+# 準備樣本數據
+sample = {
+    "chapter": "A_機器學習-監督式學習",
+    "section": "人工智慧的起源",
+    "Short_Answer_Log": "［學生答案］：推理期、知識期、學習期\n［學生表現］：Correct",
+    "Dialog": "[學生]: 偏置Bias是什麼?\n[AI Tutor]: 偏置是神經網絡中的參數..."
+}
+
+# 進行預測
+result = engine.predict_single(sample)
+print(f"預測: {result['prediction']}, 信心度: {result['confidence']:.2%}")
+```
+
+### 使用 CLI
+
+```bash
+# 互動式推理
+python inference.py --model results/roberta-chinese_20260111_034253/final_model/ --interactive
+
+# 批次推理 (CSV)
+python inference.py --model results/roberta-chinese_20260111_034253/final_model/ \
+                    --input test_data.csv \
+                    --output predictions.csv
+```
+
+---
+
+## 🔍 模型可解釋性 (LIME + LLM)
+
+本專案提供 **LLM 增強的 LIME 可解釋性** 功能，使用 OpenAI API 自動提取語義關鍵字，生成更有意義的解釋報告。
+
+### 環境配置
+
+```bash
+# 1. 複製環境變數範例
+cp .env.example .env
+
+# 2. 編輯 .env 填入 OpenAI API Key
+OPENAI_API_KEY=your-api-key-here
+OPENAI_MODEL=gpt-4o-mini  # 可選，預設為 gpt-4o-mini
+```
+
+### 使用 Python API
+
+```python
+from lime_explainer import LIMEExplainer
+
+# 初始化解釋器（啟用 LLM 關鍵字提取）
+explainer = LIMEExplainer(model_path, use_llm_keywords=True)
+
+# 生成解釋報告
+exp, keywords = explainer.explain_prediction_with_keywords(
+    sample, 
+    focus_on="student_answers",  # 針對學生回答分析
+    num_features=10
+)
+
+# 生成 HTML 報告（含完整原文高亮）
+explainer.generate_html_report(
+    exp, 
+    "lime_reports/explanation.html",
+    original_text=sample["Short_Answer_Log"],
+    keywords=keywords,
+    title="學生回答分析"
+)
+```
+
+### 分析模式
+
+| 模式 | 說明 |
+|------|------|
+| `student_answers` | 只分析學生的簡答題回答 |
+| `student_questions` | 只分析學生的提問內容 |
+| `full_text` | 完整文本分析（結合所有關鍵字） |
+
+### 核心特色
+
+- **🧠 LLM 關鍵字提取**：使用 GPT-4o-mini 自動識別語義關鍵字
+- **🎯 學生表現標籤**：分析 `Correct`、`Partially Correct`、`Incorrect` 的影響
+- **📊 自訂 HTML 報告**：
+  - 完整原文顯示
+  - 關鍵字顏色高亮（🟢 正向 / 🔴 負向）
+  - 特徵重要性表格
+  - 預測機率分佈
+
+### 執行範例
+
+```bash
+cd finetune_KT
+export PYTHONPATH=.
+python examples/lime_explain_sample.py
+```
+
+報告將生成於 `lime_reports/` 目錄。
+
+詳細說明請參考：[docs/lime_llm_walkthrough.md](docs/lime_llm_walkthrough.md)
+
+---
+
 ## 📊 訓練結果視覺化
 
 ### 訓練曲線圖解讀

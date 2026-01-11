@@ -30,3 +30,6 @@ logs/
 # Dataset and output folders (optional, uncomment if needed)
 # datasets/
 # dummy_output/
+
+# Environment variables
+.env
