@@ -14,18 +14,42 @@ from transformers import (
     BertConfig,
     BertTokenizer,
     BertForSequenceClassification,
+    RobertaConfig,
+    RobertaTokenizer,
+    RobertaForSequenceClassification,
     TrainingArguments,
     Trainer
 )
 import optuna
 from optuna.visualization import plot_optimization_history, plot_param_importances
 
+# ========================================
+# 模型配置字典
+# ========================================
+MODEL_CONFIGS = {
+    "bert-base-chinese": {
+        "config_class": BertConfig,
+        "tokenizer_class": BertTokenizer,
+        "model_class": BertForSequenceClassification,
+        "max_token_len": 512,
+        "description": "BERT Base Chinese"
+    },
+    "hfl/chinese-roberta-wwm-ext": {
+        "config_class": BertConfig,  # 注意：HFL 的 Chinese RoBERTa 仍使用 BERT 架構
+        "tokenizer_class": BertTokenizer,
+        "model_class": BertForSequenceClassification,
+        "max_token_len": 512,
+        "description": "RoBERTa WWM Chinese (Whole Word Masking)"
+    }
+}
+
 class TrainingVisualizer:
     """
     功用：負責將訓練過程中的 Log 轉化為圖表與 CSV 報表。
     """
-    def __init__(self, output_dir: str):
+    def __init__(self, output_dir: str, model_name: str = "BERT"):
         self.output_dir = output_dir
+        self.model_name = model_name  # 保存模型名稱用於圖表標題
         self._ensure_dir_exists(self.output_dir)
         matplotlib.use('Agg')         # 設定非互動式後端，避免在 Server 上報錯
         self._set_chinese_font()       # 設定中文字體
@@ -92,7 +116,7 @@ class TrainingVisualizer:
 
         # 2. 繪製主要圖表 (Loss 和 Overall Accuracy)
         fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle('BERT Knowledge Tracing - Training History', fontsize=16, fontweight='bold')
+        fig.suptitle(f'{self.model_name} Knowledge Tracing - Training History', fontsize=16, fontweight='bold')
 
         # 子圖 1: Validation Loss
         if eval_losses:
@@ -604,15 +628,16 @@ class KTDynamicDataset(Dataset):
         }
 
 
-class BertKTFinetuner:
+class KTFinetuner:
     """
-    功用：主要的協同運作類別。
-    負責初始化模型、Tokenizer、Trainer，並執行訓練和評估。
+    功用：通用的知識追蹤模型訓練類別。
+    支援 BERT、RoBERTa 等多種 Transformer 模型。
     """
-    def __init__(self, model_name: str, data_processor: KTDataProcessor, training_args: TrainingArguments, max_token_len: int = 512):
+    def __init__(self, model_name: str, data_processor: KTDataProcessor, 
+                 training_args: TrainingArguments, max_token_len: int = 512):
         """
         Args:
-            model_name (str): 要從 Hugging Face 載入的模型名稱
+            model_name (str): 模型名稱，必須在 MODEL_CONFIGS 中定義
             data_processor (KTDataProcessor): 已經準備好資料的 DataProcessor 物件
             training_args (TrainingArguments): Hugging Face 的訓練參數
             max_token_len (int): 最大 Token 長度，預設 512
@@ -622,25 +647,39 @@ class BertKTFinetuner:
         self.training_args = training_args
         self.max_token_len = max_token_len
         
+        # 檢查模型是否在配置字典中
+        if model_name not in MODEL_CONFIGS:
+            raise ValueError(
+                f"模型 '{model_name}' 不在支援列表中。\n"
+                f"支援的模型: {list(MODEL_CONFIGS.keys())}"
+            )
+        
+        model_config = MODEL_CONFIGS[model_name]
+        
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         print(f"模型將在 {self.device} 上運行")
+        print(f"使用模型: {model_config['description']}")
 
-        # 1. 載入 Tokenizer
-        self.tokenizer = BertTokenizer.from_pretrained(self.model_name)
+        # 1. 載入 Tokenizer（使用配置字典中的類別）
+        tokenizer_class = model_config["tokenizer_class"]
+        self.tokenizer = tokenizer_class.from_pretrained(self.model_name)
 
-        # 2. 載入模型 (使用 BertConfig 來傳遞標籤資訊)
-        config = BertConfig.from_pretrained(
+        # 2. 載入模型（使用配置字典中的類別）
+        config_class = model_config["config_class"]
+        model_class = model_config["model_class"]
+        
+        config = config_class.from_pretrained(
             self.model_name,
             num_labels=self.processor.num_labels,
             id2label=self.processor.id2label,
             label2id=self.processor.label_map
         )
-        self.model = BertForSequenceClassification.from_pretrained(
+        self.model = model_class.from_pretrained(
             self.model_name,
             config=config
         ).to(self.device)
         
-        self.trainer = None # Trainer 會在 run_finetuning 時被初始化
+        self.trainer = None
 
     @staticmethod
     def _compute_metrics(eval_pred):
@@ -730,7 +769,9 @@ class BertKTFinetuner:
         y_true = val_predictions.label_ids
         
         # 使用 TrainingVisualizer 繪製混淆矩陣
-        visualizer = TrainingVisualizer(self.training_args.output_dir)
+        # 從 MODEL_CONFIGS 取得模型描述作為圖表標題
+        model_description = MODEL_CONFIGS.get(self.model_name, {}).get("description", self.model_name)
+        visualizer = TrainingVisualizer(self.training_args.output_dir, model_name=model_description)
         class_names = [self.processor.id2label[i] for i in range(self.processor.num_labels)]
         visualizer.plot_confusion_matrix(y_true, y_pred, class_names)
 
@@ -846,11 +887,9 @@ class HyperparameterSearcher:
                 "logging_dir": f"{trial_output_dir}/logs",
                 "logging_steps": 10,
                 "eval_strategy": "epoch",
-                "save_strategy": "epoch",
-                "load_best_model_at_end": True,
+                "save_strategy": "no",  # 不保存 checkpoint，節省空間
                 "metric_for_best_model": "macro_f1",
                 "report_to": "none",
-                "save_total_limit": 2,
                 "seed": 42,
                 "data_seed": 42
             }
@@ -959,186 +998,294 @@ def ensure_dir_exists(path: str):
 
 
 
+def generate_comparison_report(bert_results: dict, roberta_results: dict, output_path: str):
+    """
+    生成 BERT vs RoBERTa 比較報告並保存為 CSV
+    
+    Args:
+        bert_results: BERT 訓練結果字典
+        roberta_results: RoBERTa 訓練結果字典
+        output_path: CSV 保存路徑
+    """
+    import pandas as pd
+    from datetime import datetime
+    
+    print(f"\n{'='*80}")
+    print("📊 生成模型比較報告")
+    print(f"{'='*80}\n")
+    
+    # 準備比較數據
+    comparison_data = {
+        "模型名稱": ["BERT (bert-base-chinese)", "RoBERTa (hfl/chinese-roberta-wwm-ext)"],
+        "Macro F1-Score": [
+            bert_results.get("eval_macro_f1", 0),
+            roberta_results.get("eval_macro_f1", 0)
+        ],
+        "整體準確率": [
+            bert_results.get("eval_accuracy", 0),
+            roberta_results.get("eval_accuracy", 0)
+        ],
+        "待加強_F1": [
+            bert_results.get("eval_待加強_f1", 0),
+            roberta_results.get("eval_待加強_f1", 0)
+        ],
+        "尚可_F1": [
+            bert_results.get("eval_尚可_f1", 0),
+            roberta_results.get("eval_尚可_f1", 0)
+        ],
+        "精熟_F1": [
+            bert_results.get("eval_精熟_f1", 0),
+            roberta_results.get("eval_精熟_f1", 0)
+        ],
+        "模型路徑": [
+            bert_results.get("model_path", "N/A"),
+            roberta_results.get("model_path", "N/A")
+        ],
+        "訓練時間戳": [
+            bert_results.get("timestamp", "N/A"),
+            roberta_results.get("timestamp", "N/A")
+        ]
+    }
+    
+    df = pd.DataFrame(comparison_data)
+    
+    # 保存 CSV
+    df.to_csv(output_path, index=False, encoding='utf-8-sig')
+    print(f"✅ 比較報告已保存至: {output_path}\n")
+    
+    # 打印到終端
+    print("="*80)
+    print("📊 BERT vs RoBERTa 性能比較")
+    print("="*80)
+    print(df.to_string(index=False))
+    print("="*80)
+    
+    # 判斷最佳模型
+    bert_f1 = bert_results.get("eval_macro_f1", 0)
+    roberta_f1 = roberta_results.get("eval_macro_f1", 0)
+    
+    if roberta_f1 > bert_f1:
+        improvement = ((roberta_f1 - bert_f1) / bert_f1) * 100
+        print(f"\n🏆 最佳模型: RoBERTa")
+        print(f"📈 性能提升: {improvement:.2f}%")
+        print(f"   Macro-F1: {bert_f1:.4f} → {roberta_f1:.4f}")
+    elif bert_f1 > roberta_f1:
+        improvement = ((bert_f1 - roberta_f1) / roberta_f1) * 100
+        print(f"\n🏆 最佳模型: BERT")
+        print(f"📈 性能優勢: {improvement:.2f}%")
+        print(f"   Macro-F1: {roberta_f1:.4f} → {bert_f1:.4f}")
+    else:
+        print(f"\n⚖️  兩個模型性能相當")
+        print(f"   Macro-F1: {bert_f1:.4f}")
+    
+    print("="*80 + "\n")
+    
+    return df
+
+
 if __name__ == "__main__":
     
     # ========================================
-    # 🔧 執行模式選擇
-    # ========================================
-    # MODE = "train"   # 正常訓練模式
-    MODE = "search"    # 超參數搜索模式
-    
-    if MODE == "search":
-        # ========================================
-        # 🔍 超參數搜索模式
-        # ========================================
-        print("\n" + "="*80)
-        print("🔍 Optuna 超參數搜索模式")
-        print("=" *80 + "\n")
-        
-        SEARCH_CONFIG = {
-            "csv_path": "datasets/finetune_dataset_1132_v2.csv",
-            "model_name": "bert-base-chinese",
-            "output_base_dir": "./optuna_results",
-            "n_trials": 15,  # 嘗試 15 組參數組合
-            "study_name": "bert_kt_hp_search"
-        }
-        
-        searcher = HyperparameterSearcher(
-            model_class=BertKTFinetuner,
-            data_processor_class=KTDataProcessor
-        )
-        study = searcher.run_search(**SEARCH_CONFIG)
-        
-        print("\n" + "="*80)
-        print("✅ 超參數搜索完成！")
-        print(f"📁 結果已儲存至: {SEARCH_CONFIG['output_base_dir']}")
-        print("="*80 + "\n")
-        
-        # ========================================
-        # 🚀 自動使用最佳參數重新訓練
-        # ========================================
-        print("🚀 使用最佳參數進行完整訓練...\n")
-        
-        best_params = study.best_params
-        print("📊 最佳參數：")
-        for k, v in best_params.items():
-            print(f"  {k}: {v:.4f}" if isinstance(v, float) else f"  {k}: {v}")
-        print()
-        
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        OUTPUT_DIR = f"./results/best_model_{timestamp}"
-        FINAL_MODEL_PATH = f"{OUTPUT_DIR}/final_model"
-        
-        ensure_dir_exists(OUTPUT_DIR)
-        ensure_dir_exists(FINAL_MODEL_PATH)
-        
-        full_train_epochs = 60
-        
-        training_args_dict = {
-            "output_dir": OUTPUT_DIR,
-            "num_train_epochs": full_train_epochs,
-            "per_device_train_batch_size": best_params.get("per_device_train_batch_size", 8),
-            "per_device_eval_batch_size": 4,
-            "learning_rate": best_params.get("learning_rate", 3e-5),
-            "warmup_steps": best_params.get("warmup_steps", 100),
-            "weight_decay": best_params.get("weight_decay", 0.01),
-            "logging_dir": f"{OUTPUT_DIR}/logs",
-            "logging_steps": 10,
-            "eval_strategy": "epoch",
-            "save_strategy": "epoch",
-            "load_best_model_at_end": True,
-            "metric_for_best_model": "macro_f1",
-            "report_to": "none",
-            "seed": 42,
-            "data_seed": 42
-        }
-        
-        data_processor = KTDataProcessor(csv_path=SEARCH_CONFIG['csv_path'])
-        data_processor.prepare_data(test_size=0.2, random_state=42)
-        
-        training_args = TrainingArguments(**training_args_dict)
-        finetuner = BertKTFinetuner(
-            model_name=SEARCH_CONFIG['model_name'],
-            data_processor=data_processor,
-            training_args=training_args,
-            max_token_len=512
-        )
-        
-        finetuner.run_finetuning()
-        finetuner.save_model(save_path=FINAL_MODEL_PATH)
-        
-        print(f"\n" + "="*80)
-        print(f"🎉 完整訓練完成！")
-        print(f"📁 最終模型已儲存至: {FINAL_MODEL_PATH}")
-        print(f"📊 使用的最佳參數來自 Optuna 搜索")
-        print("="*80)
-        
-        sys.exit(0)
-    
-    # ========================================
-    # 🎯 正常訓練模式
+    # 🎯 雙模型比較實驗配置
     # ========================================
     
-    # --- 1. 定義所有設定 ---
+    print("\n" + "="*80)
+    print("🔬 BERT vs RoBERTa 知識追蹤模型比較實驗")
+    print("="*80 + "\n")
     
-    # 檔案和模型路徑
-    CONFIG = {
-        "csv_path": "datasets/finetune_dataset_1132_v2.csv",  # 更新為新資料集
-        "model_name": "bert-base-chinese",
-        "output_base_dir": "./results",
-        "final_model_dir": "final_model",
-        "test_size": 0.2,
-        "max_token_len": 512,
-    }
-
-    # 生成時間戳記（格式：YYYYMMDD_HHMMSS）
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 共用配置
+    DATASET_PATH = "datasets/finetune_dataset_1132_v2.csv"
+    N_TRIALS = 15  # Optuna 搜索次數
+    FULL_TRAIN_EPOCHS = 40  # 使用最佳參數後的完整訓練輪數
     
-    # 動態生成訓練結果資料夾路徑
-    OUTPUT_DIR = f"{CONFIG['output_base_dir']}/{CONFIG['model_name']}_{timestamp}"
-    FINAL_MODEL_PATH = f"{OUTPUT_DIR}/{CONFIG['final_model_dir']}"
+    # 記錄訓練結果
+    training_results = {}
     
-    # 確保資料夾存在
-    ensure_dir_exists(OUTPUT_DIR)
-    ensure_dir_exists(FINAL_MODEL_PATH)
+    # ========================================
+    # 實驗 1: BERT 模型
+    # ========================================
     
-    print(f"\n📁 訓練結果將儲存至: {OUTPUT_DIR}")
-    print(f"📁 最終模型將儲存至: {FINAL_MODEL_PATH}\n")
+    print("\n" + "="*80)
+    print("🔍 實驗 1/2: BERT 模型 (bert-base-chinese)")
+    print("="*80 + "\n")
     
-    # 訓練參數 (打包成一個字典)
-    # 可以在這裡調整訓練的超參數
-    training_args_dict = {
-        "output_dir": OUTPUT_DIR,
-        "num_train_epochs": 60,                 # 訓練輪數
-        "per_device_train_batch_size": 4,       # 每個 GPU/CPU 的 batch size
-        "per_device_eval_batch_size": 4,        # 驗證時的 batch size
-        "learning_rate": 5e-5,                  # 學習率
-        "warmup_steps": 50,                     # 預熱步數
-        "weight_decay": 0.01,                   # 權重衰減
-        "logging_dir": f"{OUTPUT_DIR}/logs",    # TensorBoard 日誌目錄
-        "logging_steps": 10,                    # 每幾步紀錄一次 log
-        "eval_strategy": "epoch",         # 每個 epoch 結束後進行評估
-        "save_strategy": "epoch",               # 每個 epoch 結束後儲存 checkpoint
-        "load_best_model_at_end": True,         # 訓練結束後載入表現最好的模型
-        "metric_for_best_model": "macro_f1",  # 使用 macro-F1（更適合不平衡分類）
-        "report_to": "none",
-        "seed": 42,
-        "data_seed": 42
-    }
+    bert_model_name = "bert-base-chinese"
+    bert_output_base = "./optuna_results/bert"
     
-    # --- 2. 執行資料處理 ---
+    # BERT Optuna 搜索
+    print(f"開始 BERT 超參數搜索 ({N_TRIALS} trials)...\n")
     
-    # 初始化資料處理器
-    data_processor = KTDataProcessor(csv_path=CONFIG['csv_path'])
-    data_processor.prepare_data(test_size=CONFIG['test_size'])
-    
-    # Token 長度分析
-    ratio, max_len = data_processor.analyze_token_lengths(CONFIG['model_name'], threshold=CONFIG['max_token_len'])
-    
-    if ratio > 5.0:
-        print(f"\n⚠️ 警告：有 {ratio:.2f}% 的資料長度超過 512 tokens (最大 {max_len})")
-        print("建議考慮使用支援長文本的模型 (如 Longformer, BigBird) 或調整資料截斷策略。")
-    else:
-        print(f"\n✅ 資料長度檢查通過 (超過 512 的比例為 {ratio:.2f}%)")
-
-    # --- 3. 執行模型 Finetune ---
-    training_args = TrainingArguments(**training_args_dict)
-    
-    finetuner = BertKTFinetuner(
-        model_name=CONFIG['model_name'],
-        data_processor=data_processor,
-        training_args=training_args,
-        max_token_len=CONFIG['max_token_len']
+    bert_searcher = HyperparameterSearcher(
+        model_class=KTFinetuner,
+        data_processor_class=KTDataProcessor
     )
     
-    finetuner.run_finetuning()
+    bert_study = bert_searcher.run_search(
+        csv_path=DATASET_PATH,
+        model_name=bert_model_name,
+        output_base_dir=bert_output_base,
+        n_trials=N_TRIALS,
+        study_name="bert_hp_search"
+    )
     
-    # --- 4. 儲存最終模型 ---
-    finetuner.save_model(save_path=FINAL_MODEL_PATH)
+    # BERT 完整訓練
+    print("\n" + "="*80)
+    print(f"🚀 使用最佳參數訓練 BERT ({FULL_TRAIN_EPOCHS} epochs)")
+    print("="*80 + "\n")
     
-    print(f"\n" + "="*80)
-    print(f"✅ 訓練完成！")
-    print(f"📁 所有訓練結果已儲存至: {OUTPUT_DIR}")
-    print(f"📁 最終模型已儲存至: {FINAL_MODEL_PATH}")
-    print(f"🕒 訓練時間戳記: {timestamp}")
+    bert_best_params = bert_study.best_params
+    timestamp_bert = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 符合使用者要求的命名格式
+    bert_output_dir = f"./results/bert-base-chinese_{timestamp_bert}"
+    bert_model_path = f"{bert_output_dir}/final_model"
+    
+    ensure_dir_exists(bert_output_dir)
+    ensure_dir_exists(bert_model_path)
+    
+    bert_training_args = TrainingArguments(
+        output_dir=bert_output_dir,
+        num_train_epochs=FULL_TRAIN_EPOCHS,
+        per_device_train_batch_size=bert_best_params.get("per_device_train_batch_size", 8),
+        per_device_eval_batch_size=4,
+        learning_rate=bert_best_params.get("learning_rate", 3e-5),
+        warmup_steps=bert_best_params.get("warmup_steps", 100),
+        weight_decay=bert_best_params.get("weight_decay", 0.01),
+        logging_dir=f"{bert_output_dir}/logs",
+        logging_steps=10,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=2,  # 只保留最近 2 個 checkpoint，節省空間
+        load_best_model_at_end=True,
+        metric_for_best_model="macro_f1",
+        report_to="none",
+        seed=42,
+        data_seed=42
+    )
+    
+    bert_data_processor = KTDataProcessor(csv_path=DATASET_PATH)
+    bert_data_processor.prepare_data(test_size=0.2, random_state=42)
+    
+    bert_finetuner = KTFinetuner(
+        model_name=bert_model_name,
+        data_processor=bert_data_processor,
+        training_args=bert_training_args,
+        max_token_len=512
+    )
+    
+    bert_finetuner.run_finetuning()
+    bert_finetuner.save_model(save_path=bert_model_path)
+    
+    # 獲取 BERT 最終評估結果
+    bert_eval_results = bert_finetuner.trainer.evaluate()
+    training_results["bert"] = {
+        **bert_eval_results,
+        "model_path": bert_model_path,
+        "timestamp": timestamp_bert
+    }
+    
+    print(f"\n✅ BERT 訓練完成！模型保存至: {bert_model_path}\n")
+    
+    # ========================================
+    # 實驗 2: RoBERTa 模型
+    # ========================================
+    
+    print("\n" + "="*80)
+    print("🔍 實驗 2/2: RoBERTa 模型 (hfl/chinese-roberta-wwm-ext)")
+    print("="*80 + "\n")
+    
+    roberta_model_name = "hfl/chinese-roberta-wwm-ext"
+    roberta_output_base = "./optuna_results/roberta"
+    
+    # RoBERTa Optuna 搜索
+    print(f"開始 RoBERTa 超參數搜索 ({N_TRIALS} trials)...\n")
+    
+    roberta_searcher = HyperparameterSearcher(
+        model_class=KTFinetuner,
+        data_processor_class=KTDataProcessor
+    )
+    
+    roberta_study = roberta_searcher.run_search(
+        csv_path=DATASET_PATH,
+        model_name=roberta_model_name,
+        output_base_dir=roberta_output_base,
+        n_trials=N_TRIALS,
+        study_name="roberta_hp_search"
+    )
+    
+    # RoBERTa 完整訓練
+    print("\n" + "="*80)
+    print(f"🚀 使用最佳參數訓練 RoBERTa ({FULL_TRAIN_EPOCHS} epochs)")
+    print("="*80 + "\n")
+    
+    roberta_best_params = roberta_study.best_params
+    timestamp_roberta = datetime.now().strftime("%Y%m%d_%H%M%S")
+    # 符合使用者要求的命名格式
+    roberta_output_dir = f"./results/roberta-chinese_{timestamp_roberta}"
+    roberta_model_path = f"{roberta_output_dir}/final_model"
+    
+    ensure_dir_exists(roberta_output_dir)
+    ensure_dir_exists(roberta_model_path)
+    
+    roberta_training_args = TrainingArguments(
+        output_dir=roberta_output_dir,
+        num_train_epochs=FULL_TRAIN_EPOCHS,
+        per_device_train_batch_size=roberta_best_params.get("per_device_train_batch_size", 8),
+        per_device_eval_batch_size=4,
+        learning_rate=roberta_best_params.get("learning_rate", 3e-5),
+        warmup_steps=roberta_best_params.get("warmup_steps", 100),
+        weight_decay=roberta_best_params.get("weight_decay", 0.01),
+        logging_dir=f"{roberta_output_dir}/logs",
+        logging_steps=10,
+        eval_strategy="epoch",
+        save_strategy="epoch",
+        save_total_limit=2,  # 只保留最近 2 個 checkpoint，節省空間
+        load_best_model_at_end=True,
+        metric_for_best_model="macro_f1",
+        report_to="none",
+        seed=42,
+        data_seed=42
+    )
+    
+    roberta_data_processor = KTDataProcessor(csv_path=DATASET_PATH)
+    roberta_data_processor.prepare_data(test_size=0.2, random_state=42)
+    
+    roberta_finetuner = KTFinetuner(
+        model_name=roberta_model_name,
+        data_processor=roberta_data_processor,
+        training_args=roberta_training_args,
+        max_token_len=512
+    )
+    
+    roberta_finetuner.run_finetuning()
+    roberta_finetuner.save_model(save_path=roberta_model_path)
+    
+    # 獲取 RoBERTa 最終評估結果
+    roberta_eval_results = roberta_finetuner.trainer.evaluate()
+    training_results["roberta"] = {
+        **roberta_eval_results,
+        "model_path": roberta_model_path,
+        "timestamp": timestamp_roberta
+    }
+    
+    print(f"\n✅ RoBERTa 訓練完成！模型保存至: {roberta_model_path}\n")
+    
+    # ========================================
+    # 📊 生成比較報告
+    # ========================================
+    
+    comparison_output = "./results/model_comparison_report.csv"
+    ensure_dir_exists("./results")
+    
+    generate_comparison_report(
+        bert_results=training_results["bert"],
+        roberta_results=training_results["roberta"],
+        output_path=comparison_output
+    )
+    
+    print("\n" + "="*80)
+    print("🎉 雙模型比較實驗完成！")
     print("="*80)
+    print(f"📁 BERT 模型: {bert_model_path}")
+    print(f"📁 RoBERTa 模型: {roberta_model_path}")
+    print(f"📊 比較報告: {comparison_output}")
+    print("="*80 + "\n")
