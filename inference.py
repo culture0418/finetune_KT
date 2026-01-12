@@ -41,6 +41,21 @@ class RoBERTaInference:
         except Exception as e:
             raise RuntimeError(f"Failed to load model: {e}")
 
+    def _clean_performance_labels(self, text: str) -> str:
+        """
+        移除 Short_Answer_Log 中的學生表現標籤，保持與訓練時一致。
+        
+        移除格式：［學生表現］：Correct / Partially Correct / Incorrect
+        """
+        import re
+        cleaned = re.sub(
+            r'［學生表現］[:：]\s*(Correct|Partially Correct|Incorrect)\s*',
+            '',
+            text,
+            flags=re.IGNORECASE
+        )
+        return cleaned.strip()
+
     def _format_text(self, sample: Dict) -> str:
         """
         Format input text to match training data format.
@@ -53,7 +68,8 @@ class RoBERTaInference:
         """
         chapter = str(sample.get('chapter', ''))
         section = str(sample.get('section', ''))
-        short_answer_log = str(sample.get('Short_Answer_Log', ''))
+        # 移除學生表現標籤，與訓練時保持一致
+        short_answer_log = self._clean_performance_labels(str(sample.get('Short_Answer_Log', '')))
         dialog = str(sample.get('Dialog', ''))
         
         # Consistent with KTDynamicDataset

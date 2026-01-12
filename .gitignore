@@ -14,7 +14,9 @@ bert_kt_finetune_results/
 my_finetuned_bert_kt_model/
 results/*/checkpoint-*/
 results/*/final_model/
-optuna_results/trial_*/
+results/roberta-chinese_*/
+results/bert-base-chinese_*/
+optuna_results/*/trial_*/
 training_result/
 logs/
 

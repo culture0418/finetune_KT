@@ -8,7 +8,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 def main():
     # Path to the trained model
     # Note: Using the path found in the previous step
-    model_path = "results/roberta-chinese_20260111_034253/final_model/"
+    model_path = "results/roberta-chinese_20260112_201404/final_model/"
     
     if not os.path.exists(model_path):
         print(f"Error: Model path {model_path} does not exist.")

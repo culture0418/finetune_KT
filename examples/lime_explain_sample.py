@@ -1,12 +1,13 @@
-from lime_explainer import LIMEExplainer
 import os
 import sys
 
 # Add parent directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from lime_explainer import LIMEExplainer
+
 def main():
-    model_path = "results/roberta-chinese_20260111_034253/final_model/"
+    model_path = "results/roberta-chinese_20260112_201404/final_model/"
     
     if not os.path.exists(model_path):
         print(f"Error: Model path {model_path} does not exist.")
@@ -20,9 +21,11 @@ def main():
         "chapter": "A_機器學習-監督式學習",
         "section": "人工智慧的起源",
         "Short_Answer_Log": """［題目］：（簡答題）艾倫．圖靈（Alan Turing）於 1950 年提出的「圖靈測試」，其判斷電腦是否具備智慧的標準是什麼？
+［參考答案］：能否透過對話使人無法區分對話者是電腦還是人類
 ［學生答案］：電腦能否透過文字達成無法分辨的人類表達方式與智慧
 ［學生表現］：Partially Correct
 ［題目］：（簡答題）根據「AI 發展簡史」圖表，人工智慧的發展歷程主要被劃分為哪三個時期
+［參考答案］：推理期、知識期、學習期
 ［學生答案］：推理期、知識期、學習期
 ［學生表現］：Correct""",
         "Dialog": """[課後對話]

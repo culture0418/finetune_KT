@@ -56,25 +56,30 @@ class LIMEExplainer:
             return []
             
         if focus_type == "student_answers":
-            prompt = f"""請從以下學生簡答題紀錄中提取重要的關鍵資訊。
+            prompt = f"""請從以下學生簡答題回答中提取 5-10 個最重要的專業術語或核心概念詞彙。
 
-學生紀錄：
+重要指引：
+1. **只提取**：專業術語、技術名詞、核心概念
+2. **必須排除**：疑問詞（什麼、如何、為何）、語氣詞、連接詞、介詞、代詞
+3. 關鍵詞應該是名詞或名詞短語，能反映學生理解的專業知識點
+
+學生回答：
 {text}
 
-請提取以下兩類資訊：
-1. 學生回答中的關鍵詞或短語（5-10個）
-2. 學生表現標籤（如 "Correct", "Partially Correct", "Incorrect"）
-
-請以 JSON 陣列格式輸出所有關鍵資訊，例如：["關鍵字1", "關鍵字2", "Correct", "Partially Correct", ...]
+請以 JSON 陣列格式輸出，例如：["機器學習", "監督式學習", "神經網絡"]
 只輸出 JSON，不要其他文字。"""
         else:  # student_questions
-            prompt = f"""請從以下學生提問中提取 5-10 個最重要的關鍵詞或短語。
-這些關鍵詞應該是能反映學生疑問或理解程度的詞彙。
+            prompt = f"""請從以下學生提問中提取 5-10 個最重要的專業術語或核心概念詞彙。
+
+重要指引：
+1. **只提取**：專業術語、技術名詞、核心概念
+2. **必須排除**：疑問詞（什麼、如何、為何、哪裡、誰）、語氣詞、連接詞、介詞、代詞
+3. 關鍵詞應該是名詞或名詞短語，能反映學生疑問的專業知識點
 
 學生提問：
 {text}
 
-請以 JSON 陣列格式輸出，例如：["關鍵字1", "關鍵字2", ...]
+請以 JSON 陣列格式輸出，例如：["偏置", "Bias", "激活函數"]
 只輸出 JSON，不要其他文字。"""
 
         try:
@@ -117,18 +122,14 @@ class LIMEExplainer:
         """
         if focus_on == "student_answers":
             short_answer_log = text_data.get("Short_Answer_Log", "")
-            # Extract student answers AND performance labels
-            # Pattern handles: Correct, Partially Correct, Incorrect
-            student_records = re.findall(
-                r'［學生答案］[:：]\s*(.+?)［學生表現］[:：]\s*(Correct|Partially Correct|Incorrect)', 
+            # Extract only student answers, excluding performance labels
+            # Pattern: ［學生答案］：... (until next ［ or end)
+            student_answers = re.findall(
+                r'［學生答案］[:：]\s*(.+?)(?=［|$)', 
                 short_answer_log, 
                 re.DOTALL
             )
-            # Combine answer content with performance label
-            combined = []
-            for answer, performance in student_records:
-                combined.append(f"{answer.strip()} ({performance})")
-            return " | ".join(combined) if combined else short_answer_log
+            return " | ".join([ans.strip() for ans in student_answers]) if student_answers else short_answer_log
         
         elif focus_on == "student_questions":
             dialog = text_data.get("Dialog", "")
@@ -320,8 +321,33 @@ class LIMEExplainer:
                 
         return np.concatenate(probs_list, axis=0)
 
+    def _get_student_text_regions(self, text: str) -> List[tuple]:
+        """
+        Identify regions of text that contain student content (answers and questions).
+        
+        Args:
+            text: Full text containing student answers and questions
+            
+        Returns:
+            List of (start, end) tuples marking student text regions
+        """
+        regions = []
+        
+        # Find all [學生答案] regions
+        for match in re.finditer(r'［學生答案］[:：]\s*(.+?)(?=［|$)', text, re.DOTALL):
+            regions.append((match.start(1), match.end(1)))
+        
+        # Find all [學生] question regions  
+        for match in re.finditer(r'\[學生\][:：]\s*(.+?)(?=\[AI Tutor\]|\[學生\]|$)', text, re.DOTALL):
+            regions.append((match.start(1), match.end(1)))
+        
+        # Sort by start position
+        regions.sort(key=lambda x: x[0])
+        return regions
+
     def generate_html_report(self, exp, output_path: str, original_text: str = None, 
                              keywords: List[str] = None, title: str = "LIME Explanation"):
+
         """
         Save explanation as HTML with full text and keyword highlighting.
         
@@ -351,7 +377,14 @@ class LIMEExplainer:
         # Create highlighted text using robust index-based replacement
         highlighted_text = ""
         if original_text and keywords:
-            # 1. Find all matches for all keywords
+            # Get student text regions (where we want highlighting)
+            student_regions = self._get_student_text_regions(original_text)
+            
+            # Helper function to check if a position is in student text
+            def is_in_student_region(pos):
+                return any(start <= pos < end for start, end in student_regions)
+            
+            # 1. Find all matches for all keywords ONLY in student text regions
             # List of tuples: (start_index, end_index, keyword, weight)
             all_matches = []
             
@@ -363,13 +396,15 @@ class LIMEExplainer:
                 # Find all occurrences of this keyword in the text
                 # Use regex escape to handle special characters safely
                 for match in re.finditer(re.escape(keyword), original_text, re.IGNORECASE):
-                    all_matches.append({
-                        "start": match.start(),
-                        "end": match.end(),
-                        "keyword": match.group(), # Use exact text from match to preserve case
-                        "weight": weight,
-                        "length": match.end() - match.start()
-                    })
+                    # Only add if match is within student text regions
+                    if is_in_student_region(match.start()):
+                        all_matches.append({
+                            "start": match.start(),
+                            "end": match.end(),
+                            "keyword": match.group(), # Use exact text from match to preserve case
+                            "weight": weight,
+                            "length": match.end() - match.start()
+                        })
             
             # 2. Resolve overlaps: Prioritize longer keywords (e.g., "Partially Correct" over "Correct")
             # Sort by length (descending) then by start position
