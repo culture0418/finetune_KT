@@ -18,8 +18,10 @@ from transformers import (
     RobertaTokenizer,
     RobertaForSequenceClassification,
     TrainingArguments,
-    Trainer
+    Trainer,
+    EarlyStoppingCallback
 )
+import torch.nn as nn
 import optuna
 from optuna.visualization import plot_optimization_history, plot_param_importances
 
@@ -372,7 +374,7 @@ class KTDataProcessor:
         """
         self.csv_path = csv_path
         # 定義欄位和標籤 - 更新為新資料集結構
-        self.required_cols = ['chapter', 'section', 'Short_Answer_Log', 'Dialog', 'Mastery_Label']
+        self.required_cols = ['chapter', 'section', 'Short_Answer_Log', 'Mastery_Label']
         # 3 個掌握度等級：待加強、尚可、精熟
         self.label_map = {"待加強": 0, "尚可": 1, "精熟": 2}
         self.id2label = {v: k for k, v in self.label_map.items()}
@@ -533,7 +535,6 @@ class KTDataProcessor:
                 f"知識點 : {row['section']}\n"
                 f"學生掌握度 : [MASK]\n"
                 f"簡答題作答紀錄 :\n{row['Short_Answer_Log']}\n"
-                f"對話紀錄 :\n{row['Dialog']}\n"
             )
             
             # 計算長度 (不截斷)
@@ -590,11 +591,10 @@ class KTDynamicDataset(Dataset):
         row = self.data.iloc[index]
 
         # 2. 提取所有需要的欄位 (在這裡處理，確保都是字串)
-        # 新資料集使用 Short_Answer_Log 和 Dialog 欄位
+        # 新資料集使用 Short_Answer_Log 欄位
         chapter = str(row['chapter'])
         section = str(row['section'])
         short_answer_log = str(row['Short_Answer_Log'])
-        dialog = str(row['Dialog'])
         label = int(row['labels'])
 
         # 3. 【核心：動態文本合併】
@@ -605,7 +605,6 @@ class KTDynamicDataset(Dataset):
             f"知識點 : {section}\n"
             f"學生掌握度 : [MASK]\n"
             f"簡答題作答紀錄 :\n{short_answer_log}\n"
-            f"對話紀錄 :\n{dialog}\n"
         )
 
         # print(f"formatted_text: {formatted_text}, length: {len(formatted_text)}")
@@ -628,24 +627,57 @@ class KTDynamicDataset(Dataset):
         }
 
 
+# ========================================
+# 自訂 Trainer：支援類別加權 (Class Weights)
+# ========================================
+class WeightedTrainer(Trainer):
+    """
+    自訂 Trainer，支援類別加權以處理類別不平衡問題。
+    """
+    def __init__(self, class_weights=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.class_weights = class_weights
+        
+    def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+        """
+        覆寫 compute_loss 方法，使用加權的 CrossEntropyLoss
+        """
+        labels = inputs.pop("labels")
+        outputs = model(**inputs)
+        logits = outputs.logits
+        
+        if self.class_weights is not None:
+            loss_fn = nn.CrossEntropyLoss(weight=self.class_weights.to(logits.device))
+        else:
+            loss_fn = nn.CrossEntropyLoss()
+        
+        loss = loss_fn(logits, labels)
+        return (loss, outputs) if return_outputs else loss
+
+
 class KTFinetuner:
     """
     功用：通用的知識追蹤模型訓練類別。
     支援 BERT、RoBERTa 等多種 Transformer 模型。
     """
     def __init__(self, model_name: str, data_processor: KTDataProcessor, 
-                 training_args: TrainingArguments, max_token_len: int = 512):
+                 training_args: TrainingArguments, max_token_len: int = 512,
+                 class_weights: torch.Tensor = None, early_stopping_patience: int = None):
         """
         Args:
             model_name (str): 模型名稱，必須在 MODEL_CONFIGS 中定義
             data_processor (KTDataProcessor): 已經準備好資料的 DataProcessor 物件
             training_args (TrainingArguments): Hugging Face 的訓練參數
             max_token_len (int): 最大 Token 長度，預設 512
+            class_weights (torch.Tensor): 類別權重，用於處理類別不平衡
+            early_stopping_patience (int): Early Stopping 耐心値，幾個 epoch 無進步則停止
         """
         self.model_name = model_name
         self.processor = data_processor
         self.training_args = training_args
         self.max_token_len = max_token_len
+        self.class_weights = class_weights
+        self.early_stopping_patience = early_stopping_patience
         
         # 檢查模型是否在配置字典中
         if model_name not in MODEL_CONFIGS:
@@ -743,14 +775,33 @@ class KTFinetuner:
         train_dataset = KTDynamicDataset(train_df, self.tokenizer, max_token_len=self.max_token_len)
         val_dataset = KTDynamicDataset(val_df, self.tokenizer, max_token_len=self.max_token_len)
 
-        # 3. 初始化 Trainer
-        self.trainer = Trainer(
-            model=self.model,
-            args=self.training_args,
-            train_dataset=train_dataset,
-            eval_dataset=val_dataset,
-            compute_metrics=self._compute_metrics,
-        )
+        # 3. 設定 callbacks
+        callbacks = []
+        if self.early_stopping_patience is not None:
+            callbacks.append(EarlyStoppingCallback(early_stopping_patience=self.early_stopping_patience))
+            print(f"🚨 Early Stopping 已啟用，耐心値: {self.early_stopping_patience} epochs")
+
+        # 4. 初始化 Trainer (使用 WeightedTrainer 如果有類別權重)
+        if self.class_weights is not None:
+            self.trainer = WeightedTrainer(
+                class_weights=self.class_weights,
+                model=self.model,
+                args=self.training_args,
+                train_dataset=train_dataset,
+                eval_dataset=val_dataset,
+                compute_metrics=self._compute_metrics,
+                callbacks=callbacks if callbacks else None,
+            )
+            print("⚖️ 使用加權 Trainer (WeightedTrainer)")
+        else:
+            self.trainer = Trainer(
+                model=self.model,
+                args=self.training_args,
+                train_dataset=train_dataset,
+                eval_dataset=val_dataset,
+                compute_metrics=self._compute_metrics,
+                callbacks=callbacks if callbacks else None,
+            )
 
         # 4. 開始訓練
         print("--- 開始 Finetune ---")
@@ -1094,17 +1145,17 @@ if __name__ == "__main__":
     print("="*80 + "\n")
     
     # 共用配置
-    DATASET_PATH = "datasets/finetune_dataset_1132_v2.csv"
+    DATASET_PATH = "datasets/finetune_dataset_1132_v4_without_chat.csv"
     N_TRIALS = 15  # Optuna 搜索次數
-    FULL_TRAIN_EPOCHS = 40  # 使用最佳參數後的完整訓練輪數
+    FULL_TRAIN_EPOCHS = 15  # 減少訓練輪數，配合 Early Stopping
     
     # 記錄訓練結果
     training_results = {}
     
     # ========================================
-    # 實驗 1: BERT 模型
+    # 實驗 1: BERT 模型 (跳過)
     # ========================================
-    
+    """
     print("\n" + "="*80)
     print("🔍 實驗 1/2: BERT 模型 (bert-base-chinese)")
     print("="*80 + "\n")
@@ -1184,6 +1235,9 @@ if __name__ == "__main__":
     }
     
     print(f"\n✅ BERT 訓練完成！模型保存至: {bert_model_path}\n")
+    """
+    print("⚠️ Skipping BERT training as requested. Only training RoBERTa.")
+    training_results["bert"] = None # Placeholder
     
     # ========================================
     # 實驗 2: RoBERTa 模型
@@ -1231,8 +1285,8 @@ if __name__ == "__main__":
         num_train_epochs=FULL_TRAIN_EPOCHS,
         per_device_train_batch_size=roberta_best_params.get("per_device_train_batch_size", 8),
         per_device_eval_batch_size=4,
-        learning_rate=roberta_best_params.get("learning_rate", 3e-5),
-        warmup_steps=roberta_best_params.get("warmup_steps", 100),
+        learning_rate=roberta_best_params.get("learning_rate", 3e-5) * 0.5,  # 調低 Learning Rate
+        warmup_steps=roberta_best_params.get("warmup_steps", 100) + 100,  # 增加 Warmup Steps
         weight_decay=roberta_best_params.get("weight_decay", 0.01),
         logging_dir=f"{roberta_output_dir}/logs",
         logging_steps=10,
@@ -1241,6 +1295,7 @@ if __name__ == "__main__":
         save_total_limit=2,  # 只保留最近 2 個 checkpoint，節省空間
         load_best_model_at_end=True,
         metric_for_best_model="macro_f1",
+        greater_is_better=True,  # macro_f1 越高越好
         report_to="none",
         seed=42,
         data_seed=42
@@ -1249,11 +1304,25 @@ if __name__ == "__main__":
     roberta_data_processor = KTDataProcessor(csv_path=DATASET_PATH)
     roberta_data_processor.prepare_data(test_size=0.2, random_state=42)
     
+    # 計算類別權重 (基於訓練集分佈)
+    train_df, _ = roberta_data_processor.get_dataframes()
+    label_counts = train_df['labels'].value_counts().sort_index()
+    total_samples = len(train_df)
+    # 權重 = 總樣本數 / (類別數 * 該類別樣本數)
+    class_weights = torch.tensor([
+        total_samples / (3 * label_counts[0]),  # 待加強
+        total_samples / (3 * label_counts[1]),  # 尚可
+        total_samples / (3 * label_counts[2])   # 精熟
+    ], dtype=torch.float32)
+    print(f"\n📋 類別權重: 待加強={class_weights[0]:.2f}, 尚可={class_weights[1]:.2f}, 精熟={class_weights[2]:.2f}")
+    
     roberta_finetuner = KTFinetuner(
         model_name=roberta_model_name,
         data_processor=roberta_data_processor,
         training_args=roberta_training_args,
-        max_token_len=512
+        max_token_len=512,
+        class_weights=class_weights,  # 傳入類別權重
+        early_stopping_patience=3     # Early Stopping: 3 個 epoch 無進步則停止
     )
     
     roberta_finetuner.run_finetuning()
@@ -1268,24 +1337,31 @@ if __name__ == "__main__":
     }
     
     print(f"\n✅ RoBERTa 訓練完成！模型保存至: {roberta_model_path}\n")
-    
+
     # ========================================
-    # 📊 生成比較報告
+    # 📊 生成比較報告 (if BERT results exist)
     # ========================================
     
-    comparison_output = "./results/model_comparison_report.csv"
-    ensure_dir_exists("./results")
-    
-    generate_comparison_report(
-        bert_results=training_results["bert"],
-        roberta_results=training_results["roberta"],
-        output_path=comparison_output
-    )
-    
-    print("\n" + "="*80)
-    print("🎉 雙模型比較實驗完成！")
-    print("="*80)
-    print(f"📁 BERT 模型: {bert_model_path}")
-    print(f"📁 RoBERTa 模型: {roberta_model_path}")
-    print(f"📊 比較報告: {comparison_output}")
-    print("="*80 + "\n")
+    if training_results.get("bert") is not None:
+        comparison_output = "./results/model_comparison_report.csv"
+        ensure_dir_exists("./results")
+        
+        generate_comparison_report(
+            bert_results=training_results["bert"],
+            roberta_results=training_results["roberta"],
+            output_path=comparison_output
+        )
+        
+        print("\n" + "="*80)
+        print("🎉 雙模型比較實驗完成！")
+        print("="*80)
+        print(f"📁 BERT 模型: {training_results['bert']['model_path']}")
+        print(f"📁 RoBERTa 模型: {roberta_model_path}")
+        print(f"📊 比較報告: {comparison_output}")
+        print("="*80 + "\n")
+    else:
+        print("\n" + "="*80)
+        print("🎉 RoBERTa 訓練實驗完成！(BERT 訓練已跳過)")
+        print("="*80)
+        print(f"📁 RoBERTa 模型: {roberta_model_path}")
+        print("="*80 + "\n")
