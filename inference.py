@@ -54,7 +54,6 @@ class RoBERTaInference:
         chapter = str(sample.get('chapter', ''))
         section = str(sample.get('section', ''))
         short_answer_log = str(sample.get('Short_Answer_Log', ''))
-        dialog = str(sample.get('Dialog', ''))
         
         # Consistent with KTDynamicDataset
         formatted_text = (
@@ -62,7 +61,6 @@ class RoBERTaInference:
             f"知識點 : {section}\n"
             f"學生掌握度 : [MASK]\n"
             f"簡答題作答紀錄 :\n{short_answer_log}\n"
-            f"對話紀錄 :\n{dialog}\n"
         )
         return formatted_text
 
@@ -123,7 +121,7 @@ class RoBERTaInference:
         except UnicodeDecodeError:
             df = pd.read_csv(input_file, encoding='utf-8')
             
-        required_cols = ['chapter', 'section', 'Short_Answer_Log', 'Dialog']
+        required_cols = ['chapter', 'section', 'Short_Answer_Log']
         # Check if basic columns exist (allow missing if they can be empty strings, but headers must exist)
         # Actually, let's just use .get in loop, but warn if completely missing
         
@@ -182,13 +180,11 @@ def main():
                 
                 section = input("Section: ")
                 short_answer = input("Short Answer Log: ")
-                dialog = input("Dialog: ")
                 
                 sample = {
                     "chapter": chapter,
                     "section": section,
-                    "Short_Answer_Log": short_answer,
-                    "Dialog": dialog
+                    "Short_Answer_Log": short_answer
                 }
                 
                 result = engine.predict_single(sample)
