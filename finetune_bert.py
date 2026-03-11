@@ -1145,7 +1145,7 @@ if __name__ == "__main__":
     print("="*80 + "\n")
     
     # 共用配置
-    DATASET_PATH = "datasets/finetune_dataset_1132_v4_without_chat.csv"
+    DATASET_PATH = "datasets/finetune_dataset_1142_v4_without_chat_0227.csv"
     N_TRIALS = 15  # Optuna 搜索次數
     FULL_TRAIN_EPOCHS = 15  # 減少訓練輪數，配合 Early Stopping
     
