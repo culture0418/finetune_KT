@@ -1,0 +1,59 @@
+LLM Prompt Template
+===================
+本實驗中所有 LLM API 使用統一的 prompt template，確保比較的公平性。
+
+---
+
+System Prompt
+-------------
+你是一個教育評估專家。根據以下學生的學習資料，判斷該學生對此知識點的掌握程度。
+請只回答以下三個等級之一：待加強、尚可、精熟
+
+---
+
+User Prompt Template
+--------------------
+章節：{chapter}
+知識點：{section}
+簡答題作答紀錄：
+{short_answer_log}
+
+請只回答一個詞：待加強、尚可、或精熟
+
+---
+
+特殊處理說明
+------------
+
+1. Qwen3 模型 (qwen/qwen3-32b via Groq)
+   - 在 User Prompt 末尾加上 "/no_think" 指令
+   - 目的：關閉思考模式，避免輸出 <think>...</think> 標籤
+   - 實際 prompt: "{user_msg} /no_think"
+
+2. OpenAI o4-mini 模型
+   - 使用 reasoning_effort="low" 參數
+   - 目的：降低推理時間至最低，加快回應速度
+   - 不支援 temperature 參數（推理模型特性）
+
+3. Gemini 系列模型
+   - 使用 thinking_config=ThinkingConfig(thinking_budget=1024)
+   - 並從回應中過濾掉 thought=True 的 parts
+   - 目的：避免思考內容干擾分類結果
+
+---
+
+標籤對應
+--------
+中文 -> 英文
+- 待加強 -> Struggling
+- 尚可 -> Developing
+- 精熟 -> Mastered
+
+---
+
+實驗設定
+--------
+- 所有模型使用相同的 95 筆驗證集
+- temperature=0 (除 o4-mini 外)
+- max_tokens=20 (o4-mini 使用 max_completion_tokens=200)
+- 每個模型獨立推論，支援中斷續跑機制
