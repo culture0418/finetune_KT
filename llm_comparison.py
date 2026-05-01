@@ -1,13 +1,15 @@
 """
 LLM Comparison Script: Finetuned RoBERTa vs LLM APIs
 =====================================================
-比較 finetuned RoBERTa 模型與 13 個 LLM API 在知識掌握度分類任務上的效能。
+比較 finetuned RoBERTa 模型與多個 LLM API 在知識掌握度分類任務上的效能。
+評測使用 split_dataset.py 切出的 test set（對 RoBERTa 訓練是 held-out）。
 
 支援模型 (--models 的值直接對應 API model name):
   本地:    roberta
   OpenAI:  gpt-4o  gpt-4o-mini  gpt-4.1  o4-mini
   Gemini:  gemini-2.5-pro  gemini-2.5-flash  gemini-2.5-flash-lite
            gemini-3.1-pro  gemini-3-flash  gemini-3.1-flash-lite
+  Gemma:   gemma-3-4b-it  gemma-3-12b-it  gemma-3-27b-it
   Claude:  claude-sonnet-4-5
   Groq:    llama-3.3-70b-versatile  llama-3.1-8b-instant  qwen/qwen3-32b
 
@@ -16,6 +18,7 @@ Usage:
     python llm_comparison.py --models gpt-4o gpt-4.1 gemini-2.5-pro claude-sonnet-4-5
     python llm_comparison.py --models all --skip-existing
     python llm_comparison.py --models all --output-dir results/my_run
+    python llm_comparison.py --models gemma-3-27b-it --splits-dir datasets/splits/0227
 """
 
 import os
@@ -34,7 +37,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.font_manager as fm
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     confusion_matrix, classification_report
@@ -86,38 +88,36 @@ USER_PROMPT_TEMPLATE = """章節：{chapter}
 # ========================================
 # 資料載入
 # ========================================
-def load_val_dataset(csv_path: str, test_size=0.2, random_state=42) -> pd.DataFrame:
+def load_test_dataset(splits_dir: str) -> pd.DataFrame:
     """
-    載入資料集並使用與訓練相同的 split 取得 val set。
-    確保與 finetune_bert.py 中的 KTDataProcessor 使用相同的參數。
+    載入由 split_dataset.py 預先切好的 test set。
+    test set 對 RoBERTa 訓練是 held-out，可用來公平比較 RoBERTa vs LLM。
     """
-    df = pd.read_csv(csv_path, encoding='utf-8-sig')
-    
-    # 清理 (與 KTDataProcessor 邏輯一致)
+    test_path = os.path.join(splits_dir, "test.csv")
+    if not os.path.exists(test_path):
+        raise FileNotFoundError(
+            f"找不到 {test_path}\n請先執行: python split_dataset.py --output-dir {splits_dir}"
+        )
+
+    df = pd.read_csv(test_path, encoding='utf-8-sig')
+
     text_cols = ['chapter', 'section', 'Short_Answer_Log']
     for col in text_cols:
         if col not in df.columns:
             df[col] = ''
         df[col] = df[col].fillna('').astype(str)
-    
-    df = df.dropna(subset=['Mastery_Label'])
-    df['labels'] = df['Mastery_Label'].map(LABEL_MAP)
-    df = df.dropna(subset=['labels'])
+
+    if 'labels' not in df.columns:
+        df['labels'] = df['Mastery_Label'].map(LABEL_MAP)
+        df = df.dropna(subset=['labels']).copy()
     df['labels'] = df['labels'].astype(int)
     df = df.reset_index(drop=True)
-    
-    # 與訓練相同的 split
-    _, val_df = train_test_split(
-        df, test_size=test_size, random_state=random_state,
-        stratify=df['labels']
-    )
-    val_df = val_df.reset_index(drop=True)
-    
-    print(f"✓ 載入資料集: {csv_path}")
-    print(f"  全部: {len(df)} 筆, Val set: {len(val_df)} 筆")
-    print(f"  Val 標籤分佈: {dict(val_df['Mastery_Label'].value_counts())}")
-    
-    return val_df
+
+    print(f"✓ 載入 test set: {test_path}")
+    print(f"  共 {len(df)} 筆")
+    print(f"  Test 標籤分佈: {dict(df['Mastery_Label'].value_counts())}")
+
+    return df
 
 
 def parse_llm_response(response) -> str:
@@ -164,7 +164,7 @@ class BasePredictor(ABC):
         """預測單筆資料，回傳標籤字串 (待加強/尚可/精熟)"""
         pass
     
-    def predict_batch(self, val_df: pd.DataFrame, output_dir: str, skip_existing: bool = False) -> pd.DataFrame:
+    def predict_batch(self, data_df: pd.DataFrame, output_dir: str, skip_existing: bool = False) -> pd.DataFrame:
         """
         批次預測，支援中斷續跑。
         回傳包含預測結果的 DataFrame。
@@ -188,11 +188,11 @@ class BasePredictor(ABC):
             predictions = partial_df['predicted'].tolist()
             print(f"  ↩ 從第 {start_idx} 筆續跑 ({self.name})")
         
-        total = len(val_df)
+        total = len(data_df)
         print(f"  ▶ {self.name} 推論中 ({start_idx}/{total})...")
-        
+
         for idx in range(start_idx, total):
-            row = val_df.iloc[idx]
+            row = data_df.iloc[idx]
             try:
                 pred = self.predict_single(
                     chapter=str(row['chapter']),
@@ -206,13 +206,13 @@ class BasePredictor(ABC):
             
             # 每 10 筆存一次中間結果
             if (idx + 1) % 10 == 0 or idx == total - 1:
-                partial_save = val_df.iloc[:len(predictions)].copy()
+                partial_save = data_df.iloc[:len(predictions)].copy()
                 partial_save['predicted'] = predictions
                 partial_save.to_csv(partial_file, index=False, encoding='utf-8-sig')
                 print(f"    進度: {len(predictions)}/{total}")
         
         # 儲存最終結果
-        result_df = val_df.copy()
+        result_df = data_df.copy()
         result_df['predicted'] = predictions
         result_df.to_csv(pred_file, index=False, encoding='utf-8-sig')
         
@@ -487,6 +487,74 @@ class Gemini3FlashLitePredictor(_GeminiBase):
     def __init__(self): super().__init__("gemini-3.1-flash-lite-preview")
 
 
+# ========================================
+# Gemma 3 Predictors (Open-weight, via Google AI Studio API)
+# ========================================
+class _GemmaBase(BasePredictor):
+    """Gemma 3 走 Google AI Studio 端點，但不支援 thinking_config / safety_settings。"""
+
+    SLEEP_TIME = {
+        "gemma-3-27b-it": 0.4,
+        "gemma-3-12b-it": 0.3,
+        "gemma-3-4b-it": 0.2,
+    }
+
+    def __init__(self, model: str):
+        super().__init__(model, model)
+        self.client = _gemini_client()
+        self._sleep = self.SLEEP_TIME.get(model, 0.3)
+        print(f"  ✓ Gemma 初始化完成 (model: {model})")
+
+    def predict_single(self, chapter, section, short_answer_log):
+        from google.genai import types
+        user_msg = USER_PROMPT_TEMPLATE.format(
+            chapter=chapter, section=section, short_answer_log=short_answer_log)
+        # Gemma 不支援 system role，把 SYSTEM_PROMPT 併進使用者訊息
+        full_prompt = f"{SYSTEM_PROMPT}\n\n{user_msg}"
+
+        for attempt in range(3):
+            try:
+                resp = self.client.models.generate_content(
+                    model=self.model_id,
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        temperature=0,
+                        max_output_tokens=128,
+                    )
+                )
+                text = None
+                try:
+                    text = resp.text
+                except Exception:
+                    pass
+                if text is None:
+                    try:
+                        text = ''.join(
+                            p.text for p in resp.candidates[0].content.parts
+                            if hasattr(p, 'text') and p.text
+                        ) or None
+                    except Exception:
+                        pass
+                time.sleep(self._sleep)
+                return parse_llm_response(text)
+
+            except Exception as e:
+                if attempt < 2:
+                    wait = 2 ** (attempt + 1)
+                    print(f"    retry in {wait}s: {e}")
+                    time.sleep(wait)
+                else:
+                    raise
+
+
+class Gemma3_4BPredictor(_GemmaBase):
+    def __init__(self): super().__init__("gemma-3-4b-it")
+
+class Gemma3_12BPredictor(_GemmaBase):
+    def __init__(self): super().__init__("gemma-3-12b-it")
+
+class Gemma3_27BPredictor(_GemmaBase):
+    def __init__(self): super().__init__("gemma-3-27b-it")
 
 
 
@@ -893,6 +961,19 @@ MODEL_REGISTRY = {
         "class": Gemini3FlashLitePredictor,
         "description": "Google Gemini 3.1 Flash-Lite (Preview)"
     },
+    # ── Google Gemma 3 (Open Weights) ──────────────────────
+    "gemma-3-4b-it": {
+        "class": Gemma3_4BPredictor,
+        "description": "Google Gemma 3 4B Instruct (open-weight)"
+    },
+    "gemma-3-12b-it": {
+        "class": Gemma3_12BPredictor,
+        "description": "Google Gemma 3 12B Instruct (open-weight)"
+    },
+    "gemma-3-27b-it": {
+        "class": Gemma3_27BPredictor,
+        "description": "Google Gemma 3 27B Instruct (open-weight)"
+    },
     # ── Anthropic ──────────────────────────────────────────
     "claude-sonnet-4-5": {
         "class": ClaudePredictor,
@@ -924,9 +1005,9 @@ def main():
         help="要比較的模型 (預設: all)"
     )
     parser.add_argument(
-        "--dataset", type=str,
-        default="datasets/finetune_dataset_1142_v4_without_chat_0227.csv",
-        help="資料集路徑"
+        "--splits-dir", type=str,
+        default="datasets/splits/0227",
+        help="預切分目錄 (需包含 test.csv，由 split_dataset.py 產生)"
     )
     parser.add_argument(
         "--roberta-path", type=str,
@@ -965,12 +1046,12 @@ def main():
     print("=" * 60)
     print(f"  輸出目錄: {output_dir}")
     print(f"  比較模型: {model_names}")
-    print(f"  資料集: {args.dataset}")
+    print(f"  Splits 目錄: {args.splits_dir}")
     print()
-    
-    # 載入 val set
-    val_df = load_val_dataset(args.dataset)
-    y_true = val_df['Mastery_Label'].tolist()
+
+    # 載入 test set (RoBERTa 訓練未見過的 held-out split)
+    test_df = load_test_dataset(args.splits_dir)
+    y_true = test_df['Mastery_Label'].tolist()
     
     # 逐一執行各模型的推論
     for model_name in model_names:
@@ -985,7 +1066,7 @@ def main():
                 predictor = MODEL_REGISTRY[model_name]["class"]()
 
             
-            predictor.predict_batch(val_df, pred_dir, args.skip_existing)
+            predictor.predict_batch(test_df, pred_dir, args.skip_existing)
             
         except Exception as e:
             print(f"  ✗ {model_name} 失敗: {e}")

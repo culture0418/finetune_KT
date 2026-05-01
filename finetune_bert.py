@@ -8,7 +8,6 @@ import sys
 from datetime import datetime
 import torch
 from torch.utils.data import Dataset
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import accuracy_score, precision_recall_fscore_support
 from transformers import (
     BertConfig,
@@ -362,133 +361,88 @@ class TrainingVisualizer:
 
 class KTDataProcessor:
     """
-    功用：專門處理 finetune_dataset_1132_v2.csv 檔案。
-    負責載入、清理、轉換標籤（3 個掌握度等級：待加強、尚可、精熟），並分割資料集。
+    功用：載入 split_dataset.py 預先切好的 train/val/test CSV。
+    train + val 用於 RoBERTa finetuning，test 用於最終評測（與 LLM 比較同一份）。
+    標籤對應：3 個掌握度等級：待加強、尚可、精熟。
     """
-    def __init__(self, csv_path: str):
+    def __init__(self, splits_dir: str):
         """
-        初始化物件，傳入 CSV 檔案的路徑。
-        
         Args:
-            csv_path (str): 'finetune_dataset_1132_v2.csv' 的路徑
+            splits_dir (str): 預切分目錄路徑，需包含 train.csv / val.csv / test.csv
+                              (由 split_dataset.py 產生)
         """
-        self.csv_path = csv_path
-        # 定義欄位和標籤 - 更新為新資料集結構
+        self.splits_dir = splits_dir
         self.required_cols = ['chapter', 'section', 'Short_Answer_Log', 'Mastery_Label']
-        # 3 個掌握度等級：待加強、尚可、精熟
         self.label_map = {"待加強": 0, "尚可": 1, "精熟": 2}
         self.id2label = {v: k for k, v in self.label_map.items()}
-        self.num_labels = len(self.label_map)  # num_labels = 3
-        
+        self.num_labels = len(self.label_map)
+
         # 這些變數將在 prepare_data() 後被賦值
         self.train_df = None
         self.val_df = None
+        self.test_df = None
 
-    def _load_and_clean(self) -> pd.DataFrame:
-        """
-        [內部方法] 載入 CSV 並進行基本清理。
-        """
+    def _load_split_csv(self, name: str) -> pd.DataFrame:
+        """讀取單一 split CSV 並做安全性檢查（split_dataset.py 已清理過資料）。"""
+        path = os.path.join(self.splits_dir, f"{name}.csv")
         try:
-            # 建議：加上 encoding='utf-8-sig' 可以處理 Excel 存出的 CSV 常見的 BOM 問題
-            # keep_default_na=True 是預設值，會自動識別 'NA', 'NaN' 等
-            df = pd.read_csv(self.csv_path, encoding='utf-8-sig')
-            print(f"原始資料 '{self.csv_path}' 讀取成功，共 {len(df)} 筆")
+            df = pd.read_csv(path, encoding='utf-8-sig')
         except FileNotFoundError:
-            print(f"錯誤：找不到檔案 {self.csv_path}")
-            raise
-        except pd.errors.EmptyDataError:
-            print(f"錯誤：檔案 {self.csv_path} 內容為空")
+            print(f"錯誤：找不到 split 檔案 {path}")
+            print(f"請先執行: python split_dataset.py --output-dir {self.splits_dir}")
             raise
 
-        # 1. 補齊缺少欄位
+        # 補齊缺欄位（防呆，正常不會缺）
         for col in self.required_cols:
             if col not in df.columns:
-                print(f"警告：資料中缺少欄位 {col}，將自動建立並填入空值")
                 df[col] = ''
 
-        # 2. 清理特徵欄位 (非 Label)
-        # 目標：填補 NaN 為空字串，並強制轉為 String 型別 (避免數字被當成 float)
         text_cols = [c for c in self.required_cols if c != 'Mastery_Label']
         for col in text_cols:
-            # fillna('') 把 NaN 變成空字串
-            # astype(str) 確保即使 CSV 裡是數字 123，也會變成字串 "123"
             df[col] = df[col].fillna('').astype(str)
 
-        # 3. 清理標籤欄位 (Mastery_Label - 新資料集欄位名稱)
-        # 步驟 A: 先把 Mastery_Label 本身是 NaN/空值的去掉
-        if df['Mastery_Label'].isnull().any():
-            n_missing = df['Mastery_Label'].isnull().sum()
-            print(f"警告：移除 {n_missing} 筆 'Mastery_Label' 為空的資料")
-            df = df.dropna(subset=['Mastery_Label'])
-
-        # 步驟 B: 進行 Mapping
-        df['labels'] = df['Mastery_Label'].map(self.label_map)
-
-        # 步驟 C: 檢查 Mapping 後是否產生 NaN (代表出現了字典裡沒有的標籤)
-        if df['labels'].isnull().any():
-            invalid_rows = df[df['labels'].isnull()]
-            invalid_values = invalid_rows['Mastery_Label'].unique()
-            print(f"警告：移除 {len(invalid_rows)} 筆無法識別的標籤值")
-            print(f"      無法識別的值包含: {invalid_values}")
-            df = df.dropna(subset=['labels']).copy() # 這裡 copy 很重要，避免 SettingWithCopyWarning
-
-        # 4. 最終整理
-        # 轉成整數型別
+        # split_dataset.py 已寫入 labels 欄位；若舊版 CSV 沒有則重新產生
+        if 'labels' not in df.columns:
+            df['labels'] = df['Mastery_Label'].map(self.label_map)
+            df = df.dropna(subset=['labels']).copy()
         df['labels'] = df['labels'].astype(int)
-        
-        # 重置索引 (Reset Index)，讓索引從 0 開始連續，避免後續分割或 batch 出錯
         df = df.reset_index(drop=True)
-
-        print(f"資料清理完成，剩餘 {len(df)} 筆有效資料")
         return df
 
-    def prepare_data(self, test_size=0.2, random_state=42):
-        """
-        執行資料準備的主要流程：載入、清理、分割。
-        使用 stratify 確保訓練集和驗證集中，三種標籤（待加強、尚可、精熟）的比例相同。
-        """
-        df = self._load_and_clean()
-        
-        # 顯示原始資料的標籤分佈
-        print("\n原始資料標籤分佈：")
+    def _print_distribution(self, name: str, df: pd.DataFrame):
+        print(f"\n{name} 標籤分佈：")
         label_counts = df['labels'].value_counts().sort_index()
         for label_id, count in label_counts.items():
             label_name = self.id2label[label_id]
             percentage = (count / len(df)) * 100
             print(f"  {label_name} (label={label_id}): {count} 筆 ({percentage:.2f}%)")
-        
-        
-        # 分割訓練集和驗證集，使用 stratify 確保標籤分佈均衡
-        self.train_df, self.val_df = train_test_split(
-            df,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=df['labels']  # 關鍵：依據標籤進行分層抽樣
-        )
-        
-        print(f"\n資料分割完成：訓練集 {len(self.train_df)} 筆, 驗證集 {len(self.val_df)} 筆")
-        
-        # 顯示訓練集的標籤分佈
-        print("\n訓練集標籤分佈：")
-        train_label_counts = self.train_df['labels'].value_counts().sort_index()
-        for label_id, count in train_label_counts.items():
-            label_name = self.id2label[label_id]
-            percentage = (count / len(self.train_df)) * 100
-            print(f"  {label_name} (label={label_id}): {count} 筆 ({percentage:.2f}%)")
-        
-        # 顯示驗證集的標籤分佈
-        print("\n驗證集標籤分佈：")
-        val_label_counts = self.val_df['labels'].value_counts().sort_index()
-        for label_id, count in val_label_counts.items():
-            label_name = self.id2label[label_id]
-            percentage = (count / len(self.val_df)) * 100
-            print(f"  {label_name} (label={label_id}): {count} 筆 ({percentage:.2f}%)")
+
+    def prepare_data(self):
+        """讀取 train / val / test 三個 split。"""
+        self.train_df = self._load_split_csv("train")
+        self.val_df = self._load_split_csv("val")
+        self.test_df = self._load_split_csv("test")
+
+        print(f"\n載入 splits from '{self.splits_dir}':")
+        print(f"  Train: {len(self.train_df)} 筆")
+        print(f"  Val:   {len(self.val_df)} 筆")
+        print(f"  Test:  {len(self.test_df)} 筆")
+
+        self._print_distribution("訓練集", self.train_df)
+        self._print_distribution("驗證集", self.val_df)
+        self._print_distribution("測試集", self.test_df)
 
     def get_dataframes(self) -> tuple[pd.DataFrame, pd.DataFrame]:
-        """獲取已分割的訓練和驗證 DataFrame"""
+        """獲取訓練和驗證 DataFrame（保留原 API 向下相容呼叫端）"""
         if self.train_df is None or self.val_df is None:
             raise ValueError("請先呼叫 .prepare_data() 來處理資料")
         return self.train_df, self.val_df
+
+    def get_test_df(self) -> pd.DataFrame:
+        """獲取測試 DataFrame（finetune 時不會用到，僅供最終評測）"""
+        if self.test_df is None:
+            raise ValueError("請先呼叫 .prepare_data() 來處理資料")
+        return self.test_df
 
     def analyze_token_lengths(self, model_name: str, threshold: int = 512):
         """
@@ -904,7 +858,7 @@ class HyperparameterSearcher:
     
     def run_search(
         self,
-        csv_path: str,
+        splits_dir: str,
         model_name: str = "bert-base-chinese",
         output_base_dir: str = "./optuna_results",
         n_trials: int = 15,
@@ -948,8 +902,8 @@ class HyperparameterSearcher:
             try:
                 self._print_trial_info(trial.number, params)
                 
-                data_processor = self.data_processor_class(csv_path=csv_path)
-                data_processor.prepare_data(test_size=0.2, random_state=42)
+                data_processor = self.data_processor_class(splits_dir=splits_dir)
+                data_processor.prepare_data()
                 
                 training_args = TrainingArguments(**training_args_dict)
                 
@@ -1145,7 +1099,7 @@ if __name__ == "__main__":
     print("="*80 + "\n")
     
     # 共用配置
-    DATASET_PATH = "datasets/finetune_dataset_1142_v4_without_chat_0227.csv"
+    SPLITS_DIR = "datasets/splits/0227"  # 由 split_dataset.py 產生 (train/val/test)
     N_TRIALS = 15  # Optuna 搜索次數
     FULL_TRAIN_EPOCHS = 15  # 減少訓練輪數，配合 Early Stopping
     
@@ -1172,7 +1126,7 @@ if __name__ == "__main__":
     )
     
     bert_study = bert_searcher.run_search(
-        csv_path=DATASET_PATH,
+        splits_dir=SPLITS_DIR,
         model_name=bert_model_name,
         output_base_dir=bert_output_base,
         n_trials=N_TRIALS,
@@ -1213,8 +1167,8 @@ if __name__ == "__main__":
         data_seed=42
     )
     
-    bert_data_processor = KTDataProcessor(csv_path=DATASET_PATH)
-    bert_data_processor.prepare_data(test_size=0.2, random_state=42)
+    bert_data_processor = KTDataProcessor(splits_dir=SPLITS_DIR)
+    bert_data_processor.prepare_data()
     
     bert_finetuner = KTFinetuner(
         model_name=bert_model_name,
@@ -1259,7 +1213,7 @@ if __name__ == "__main__":
     )
     
     roberta_study = roberta_searcher.run_search(
-        csv_path=DATASET_PATH,
+        splits_dir=SPLITS_DIR,
         model_name=roberta_model_name,
         output_base_dir=roberta_output_base,
         n_trials=N_TRIALS,
@@ -1301,8 +1255,8 @@ if __name__ == "__main__":
         data_seed=42
     )
     
-    roberta_data_processor = KTDataProcessor(csv_path=DATASET_PATH)
-    roberta_data_processor.prepare_data(test_size=0.2, random_state=42)
+    roberta_data_processor = KTDataProcessor(splits_dir=SPLITS_DIR)
+    roberta_data_processor.prepare_data()
     
     # 計算類別權重 (基於訓練集分佈)
     train_df, _ = roberta_data_processor.get_dataframes()

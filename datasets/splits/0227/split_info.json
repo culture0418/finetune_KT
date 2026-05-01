@@ -1,0 +1,39 @@
+{
+  "source_csv": "datasets/finetune_dataset_1142_v4_without_chat_0227.csv",
+  "generated_at": "2026-04-25T16:10:07",
+  "random_state": 42,
+  "stratify": "Mastery_Label",
+  "split_ratio_target": {
+    "train": 0.7,
+    "val": 0.15,
+    "test": 0.15
+  },
+  "split_ratio_actual": {
+    "train": 0.6983,
+    "val": 0.1498,
+    "test": 0.1519
+  },
+  "counts": {
+    "total": 474,
+    "train": 331,
+    "val": 71,
+    "test": 72
+  },
+  "label_distribution": {
+    "train": {
+      "待加強": 33,
+      "尚可": 235,
+      "精熟": 63
+    },
+    "val": {
+      "待加強": 7,
+      "尚可": 51,
+      "精熟": 13
+    },
+    "test": {
+      "待加強": 7,
+      "尚可": 51,
+      "精熟": 14
+    }
+  }
+}
